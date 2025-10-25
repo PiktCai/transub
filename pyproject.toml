@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transub"
+version = "0.1.0"
+description = "CLI tool to generate Chinese subtitles for English videos"
+authors = [{ name = "Transub Authors" }]
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9",
+    "rich>=13.7",
+    "tomli>=2.0.1; python_version<'3.11'",
+    "tomli-w>=1.0",
+    "pydantic>=2.7",
+    "requests>=2.31",
+    "huggingface-hub>=0.21",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+transub = "transub.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["transub*"]
+exclude = ["output*"]
+
+[tool.typer]
+pretty_exceptions_show_locals = false

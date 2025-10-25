@@ -1,0 +1,95 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+
+# Type checker caches
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Transub generated artifacts
+.transub/
+output/
+
+# macOS / Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# AI assistant notes
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+*.ai.md
+
+# Local config
+transub.conf
+
+# Local data & media
+*.mp4
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.flac
+*.aac
+*.m4b
+*.m4p
+*.m4v
+*.m4b
