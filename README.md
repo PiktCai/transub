@@ -49,6 +49,8 @@ Intermediate state is cached so interrupted runs can resume without repeating ea
 
 Follow the guide for your platform to install dependencies and select the recommended Whisper backend.
 
+> Tip: Need only the English transcription? Append `--transcribe-only` to `transub run` to skip translation.
+
 ### Windows (PowerShell, Local Whisper)
 
 1. **Install prerequisites**
@@ -159,6 +161,8 @@ transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub
 transub show_config
 transub init --config ./transub.conf   # rerun the setup wizard
 transub configure                      # edit an existing config
+transub run demo.mp4 --transcribe-only # export English transcription only
+transub run demo.mp4 -T              # short flag for transcribe-only
 ```
 
 Cache directory `.transub/` stores audio, transcription segments, translation progress, and pipeline state. If a run is interrupted, re-running the same command resumes where it left off.

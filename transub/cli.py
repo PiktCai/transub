@@ -79,6 +79,12 @@ def run(
         "--work-dir",
         help="Temporary working directory for intermediate files",
     ),
+    transcribe_only: bool = typer.Option(
+        False,
+        "--transcribe-only",
+        "-T",
+        help="Skip translation and export the transcription only.",
+    ),
 ) -> None:
     """Run the end-to-end subtitle creation pipeline."""
 
@@ -163,6 +169,39 @@ def run(
             if segments_path:
                 state.mark_transcription(segments_path, total_lines)
 
+        if transcribe_only:
+            console.print("[cyan]Transcribe-only mode: skipping translation.[/]")
+            logger.info("Transcribe-only mode enabled; skipping translation stage.")
+
+            english_doc = source_doc
+            max_trans_chars = config.pipeline.translation_max_chars_per_line
+            min_trans_chars: int | None = None
+            if (
+                config.pipeline.refine_source_subtitles
+                and max_trans_chars
+            ):
+                min_trans_chars = (
+                    config.pipeline.translation_min_chars_per_line
+                    or min(config.pipeline.min_chars_per_line, max_trans_chars)
+                )
+                english_doc = source_doc.refine(
+                    max_chars=max_trans_chars,
+                    min_chars=min_trans_chars,
+                )
+
+            english_path = _write_document(
+                document=english_doc,
+                target_dir=Path(config.pipeline.output_dir),
+                stem=video.stem,
+                suffix=".en",
+                output_format=config.pipeline.output_format,
+            )
+            console.print(Panel.fit(f"✅ Transcription saved to {english_path}", style="green"))
+            logger.info("Transcription exported to %s", english_path)
+
+            success = True
+            return
+
         translations_path = state.translation_progress_path(
             work_dir / f"{video.stem}_translations.json"
         )
@@ -180,6 +219,7 @@ def run(
         translations_cache: Dict[str, str] = dict(existing_translations)
 
         initial_completed = len(translations_cache)
+
         def _progress_description(done: int) -> str:
             return f"[bold cyan]Translating[/] {done}/{total_lines}"
 

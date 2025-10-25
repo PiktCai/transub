@@ -49,6 +49,8 @@ Transub 的标准流水线如下：
 
 以下步骤针对不同平台提供推荐的 Whisper 后端与安装指引。
 
+> 提示：如果只需要英文转写，可在运行命令时追加 `--transcribe-only` 跳过翻译阶段。
+
 ### Windows（PowerShell，本地 Whisper）
 
 1. **安装依赖**
@@ -159,6 +161,8 @@ transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub
 transub show_config
 transub init --config ./transub.conf   # 重新运行初始化向导
 transub configure                      # 编辑现有配置
+transub run demo.mp4 --transcribe-only # 仅输出英文转写结果
+transub run demo.mp4 -T               # 使用短参数启用仅转写
 ```
 
 缓存目录 `.transub/` 会保存音频、分段 JSON、翻译进度与流水线状态；如执行中断，重新运行即可继续。
