@@ -52,7 +52,6 @@ Transub 的标准流水线如下：
 > [!TIP]
 > - 如果只需要原始转写，可在运行命令时追加 `--transcribe-only` 跳过翻译阶段。
 > - 仓库以英译中为例，但只要 Whisper / LLM 覆盖对应语言，就能自由组合。
-> - 执行 `transub init` 时，可输入 `back` 回到上一题重新填写。
 
 ### Windows（PowerShell，本地 Whisper）
 

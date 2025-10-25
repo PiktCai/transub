@@ -52,7 +52,6 @@ Follow the guide for your platform to install dependencies and select the recomm
 > [!TIP]
 > - Need only the raw transcription? Append `--transcribe-only` to `transub run` to skip translation.
 > - English→Chinese was the original use case, so that's what the bundled configs illustrate—but feel free to swap in any source/target pair.
-> - During `transub init`, type `back` to revisit the previous question.
 
 ### Windows (PowerShell, Local Whisper)
 
