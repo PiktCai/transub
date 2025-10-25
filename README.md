@@ -2,7 +2,7 @@
 
 [中文说明](README.zh-CN.md)
 
-Automate the journey from **video** to **Chinese subtitles** with a single Typer command. Transub extracts audio with `ffmpeg`, runs Whisper for transcription, and applies an LLM-driven translation pipeline that keeps punctuation, timing, and CJK/Latin spacing polished.
+Turn any **video** into ready-to-share subtitles. Transub extracts audio with `ffmpeg`, runs Whisper to transcribe the speech track, and hands the text to an LLM so you get well-translated subtitles without leaving the terminal.
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ Intermediate state is cached so interrupted runs can resume without repeating ea
 - **End-to-end pipeline** — `transub run <video.mp4>` handles extraction → transcription → translation → export.
 - **Multiple transcription backends** — choose local Whisper, `mlx-whisper`, `whisper.cpp`, or OpenAI-compatible APIs.
 - **Reliable translations** — JSON-constrained prompts, retry logic, and configurable batch sizes.
-- **Subtitle polishing** — punctuation-aware line splitting, timing offsets, and automatic spacing between Chinese and Latin characters.
+- **Subtitle polishing** — punctuation-aware line splitting, timing offsets, and optional spacing tweaks when different scripts appear in the same line.
 - **Stateful execution** — cached progress in `.transub/` avoids rework across runs.
 
 ## Quick Start
@@ -49,7 +49,9 @@ Intermediate state is cached so interrupted runs can resume without repeating ea
 
 Follow the guide for your platform to install dependencies and select the recommended Whisper backend.
 
-> Tip: Need only the English transcription? Append `--transcribe-only` to `transub run` to skip translation.
+> Tip: Need only the raw transcription? Append `--transcribe-only` to `transub run` to skip translation.
+> Tip: English→Chinese was the original use case, so that’s what the bundled configs illustrate—but feel free to swap in any source/target pair.
+> Tip: During `transub init`, type `back` to revisit the previous question.
 
 ### Windows (PowerShell, Local Whisper)
 
@@ -75,7 +77,7 @@ Follow the guide for your platform to install dependencies and select the recomm
    ```powershell
    transub run .\video.mp4 --work-dir .\.transub
    ```
-   Subtitles are written to `.\output\` (e.g., `video.zh_cn.srt`, `video.en.srt`).
+   Subtitles are written to `.\output\` with language-specific suffixes (for example, `video.en.srt` or `video.ja.srt`).
 
 ### macOS (Apple Silicon, mlx-whisper)
 
@@ -101,7 +103,7 @@ Follow the guide for your platform to install dependencies and select the recomm
    ```bash
    transub run ./video.mp4 --work-dir ./.transub
    ```
-   Subtitles appear in `./output/` as `.srt` or `.vtt` depending on your configuration.
+   Subtitles appear in `./output/` as `.srt` or `.vtt`, using suffixes that match your configured target language.
 
 ### Linux (Bash, Local Whisper)
 
@@ -160,8 +162,8 @@ Run `transub configure` for an interactive editor, or update the file manually. 
 transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub
 transub show_config
 transub init --config ./transub.conf   # rerun the setup wizard
-transub configure                      # edit an existing config
-transub run demo.mp4 --transcribe-only # export English transcription only
+transub configure                      # edit config (0 saves, Q discards)
+transub run demo.mp4 --transcribe-only # export raw transcription only
 transub run demo.mp4 -T              # short flag for transcribe-only
 ```
 

@@ -2,7 +2,7 @@
 
 [English README](README.md)
 
-Transub 通过 Typer 命令行，将 **视频** 自动转换为 **中文字幕**：使用 `ffmpeg` 抽取音频，借助 Whisper 完成英文转写，并由 LLM 生成符合字幕排版规范的翻译文本，保持断句、时间轴与中英文间距的自然舒适。
+Transub 通过 Typer 命令行，**提取**视频字幕并加以**翻译**：使用 `ffmpeg` 抽取音频，借助 Whisper 完成转写，并由 LLM 进行翻译，生成可直接使用的字幕文件。
 
 ## 目录
 
@@ -24,7 +24,7 @@ Transub 通过 Typer 命令行，将 **视频** 自动转换为 **中文字幕**
 Transub 的标准流水线如下：
 
 1. 使用 `ffmpeg` 从视频中提取音频。
-2. 通过 Whisper（本地、mlx、whisper.cpp 或 API）生成英文转写。
+2. 通过 Whisper（本地、mlx、whisper.cpp 或 API）生成语音转写。
 3. 将字幕分批发送给 LLM，使用 JSON 约束确保输出稳定。
 4. 输出 `.srt` / `.vtt` 文件，控制行长、断句和时间轴偏移。
 
@@ -35,7 +35,7 @@ Transub 的标准流水线如下：
 - **一键处理**：`transub run <视频文件>` 即可完成提取 → 转写 → 翻译 → 导出。
 - **多种 Whisper 后端**：支持本地 Whisper、`mlx-whisper`、`whisper.cpp` 以及兼容 OpenAI 的 API。
 - **稳定翻译**：JSON 约束、自动重试、可调节批量大小。
-- **字幕排版友好**：智能断句、时间轴微调、中英字符自动补空格。
+- **字幕排版友好**：智能断句、时间轴微调，可选的多脚本间距优化。
 - **断点续跑**：缓存目录 `.transub/` 可保存音频、分段和翻译进度，避免重复计算。
 
 ## 快速开始
@@ -49,7 +49,9 @@ Transub 的标准流水线如下：
 
 以下步骤针对不同平台提供推荐的 Whisper 后端与安装指引。
 
-> 提示：如果只需要英文转写，可在运行命令时追加 `--transcribe-only` 跳过翻译阶段。
+> 提示：如果只需要原始转写，可在运行命令时追加 `--transcribe-only` 跳过翻译阶段。
+> 提示：仓库示例延续了英↔中的出发点，但只要 Whisper / LLM 覆盖对应语言，就能自由组合。
+> 提示：执行 `transub init` 时，可输入 `back`（或“上一步”）返回上一题重新填写。
 
 ### Windows（PowerShell，本地 Whisper）
 
@@ -75,7 +77,7 @@ Transub 的标准流水线如下：
    ```powershell
    transub run .\video.mp4 --work-dir .\.transub
    ```
-   生成字幕输出到 `.\output\`，默认包含 `video.zh_cn.srt` 与 `video.en.srt`。
+   生成字幕输出到 `.\output\`，文件名会附加语言后缀（例如 `video.en.srt`、`video.ja.srt`）。
 
 ### macOS（Apple Silicon，mlx-whisper）
 
@@ -160,8 +162,8 @@ timing_offset_seconds = 0.05
 transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub
 transub show_config
 transub init --config ./transub.conf   # 重新运行初始化向导
-transub configure                      # 编辑现有配置
-transub run demo.mp4 --transcribe-only # 仅输出英文转写结果
+transub configure                      # 编辑配置（0 保存，Q 放弃）
+transub run demo.mp4 --transcribe-only # 仅输出原始转写结果
 transub run demo.mp4 -T               # 使用短参数启用仅转写
 ```
 

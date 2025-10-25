@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional
 
 import typer
-from rich.console import Console
+from rich import box
+from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.progress import SpinnerColumn, Progress, TextColumn, TaskProgressColumn
+from rich.padding import Padding
+from rich.table import Table
+from rich.text import Text
 from .audio import AudioExtractionError, extract_audio
 from .config import ConfigManager, TransubConfig, DEFAULT_TRANSLATION_PROMPT
 from .logger import setup_logging
@@ -22,7 +27,12 @@ from .subtitles import SubtitleDocument
 from .transcribe import TranscriptionError, transcribe_audio
 from .translate import LLMTranslationError, translate_subtitles
 
-app = typer.Typer(add_completion=False, help="Generate Chinese subtitles from English videos.")
+THEME_COLOR = "#33c9b2"
+THEME_VARIABLE_COLOR = "#f0b429"
+THEME_VARIABLE_STYLE = f"bold {THEME_VARIABLE_COLOR}"
+THEME_HIGHLIGHT = f"bold {THEME_COLOR}"
+
+app = typer.Typer(add_completion=False, help="Transcribe and translate subtitles from videos.")
 console = Console()
 WHISPER_MODEL_SUGGESTIONS: dict[str, list[str]] = {
     "local": [
@@ -53,6 +63,41 @@ WHISPER_MODEL_SUGGESTIONS: dict[str, list[str]] = {
 }
 
 
+def _print_header(
+    *,
+    subtitle: str | None = None,
+    video: Path | None = None,
+    body: RenderableType | None = None,
+) -> None:
+    header = Table.grid(expand=True)
+    header.add_column(ratio=1)
+    header.add_column(justify="right")
+
+    title = Text("Transub", style=THEME_HIGHLIGHT)
+    if subtitle:
+        title.append("  ·  ", style="dim")
+        title.append(subtitle, style="white")
+    tagline = Text("video → subtitles (transcribe + translate)", style="bright_black")
+
+    header.add_row(title, tagline)
+
+    renderables: List[RenderableType] = [header]
+
+    if video:
+        video_table = _key_value_table([("source", str(video))])
+        renderables.append(video_table)
+
+    if body is not None:
+        renderables.append(body)
+
+    panel = Panel(
+        Group(*renderables),
+        border_style=THEME_COLOR,
+        padding=(1, 2),
+    )
+    console.print(panel)
+
+
 @app.command()
 def init(
     config_path: Optional[Path] = typer.Option(
@@ -65,6 +110,7 @@ def init(
     """Guided configuration setup."""
 
     manager = ConfigManager(config_path or ConfigManager.default_path())
+    _print_header(subtitle="configuration wizard")
     _run_wizard(manager, allow_overwrite=True)
 
 
@@ -90,11 +136,26 @@ def run(
 
     config = _load_config(config_path)
 
-    console.print(Panel.fit("Transub pipeline", style="bold cyan"))
-    console.print(f"Video: [bold]{video}[/]")
-
     work_dir = (work_dir or Path("./.transub")).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    config_display = (config_path or ConfigManager.default_path()).resolve()
+    mode_label = "transcribe-only" if transcribe_only else "full pipeline"
+    source_lang = config.whisper.language or "auto"
+    target_lang = config.llm.target_language or "auto"
+    source_text = Text(source_lang, style=THEME_VARIABLE_STYLE)
+    target_text = Text(target_lang, style=THEME_VARIABLE_STYLE)
+    run_snapshot = _key_value_table(
+        [
+            ("config", str(config_display)),
+            ("work_dir", str(work_dir)),
+            ("mode", mode_label),
+            ("source language", source_text),
+            ("target language", target_text),
+        ]
+    )
+
+    _print_header(subtitle="pipeline", video=video, body=run_snapshot)
 
     logger = setup_logging(work_dir / "transub.log")
     logger.info("Starting pipeline for %s", video)
@@ -170,10 +231,10 @@ def run(
                 state.mark_transcription(segments_path, total_lines)
 
         if transcribe_only:
-            console.print("[cyan]Transcribe-only mode: skipping translation.[/]")
+            console.print(f"[{THEME_COLOR}]Transcribe-only mode: skipping translation.[/]")
             logger.info("Transcribe-only mode enabled; skipping translation stage.")
 
-            english_doc = source_doc
+            transcript_doc = source_doc
             max_trans_chars = config.pipeline.translation_max_chars_per_line
             min_trans_chars: int | None = None
             if (
@@ -184,20 +245,21 @@ def run(
                     config.pipeline.translation_min_chars_per_line
                     or min(config.pipeline.min_chars_per_line, max_trans_chars)
                 )
-                english_doc = source_doc.refine(
+                transcript_doc = source_doc.refine(
                     max_chars=max_trans_chars,
                     min_chars=min_trans_chars,
                 )
 
-            english_path = _write_document(
-                document=english_doc,
+            source_suffix = _source_language_suffix(config.whisper.language)
+            transcript_path = _write_document(
+                document=transcript_doc,
                 target_dir=Path(config.pipeline.output_dir),
                 stem=video.stem,
-                suffix=".en",
+                suffix=source_suffix,
                 output_format=config.pipeline.output_format,
             )
-            console.print(Panel.fit(f"✅ Transcription saved to {english_path}", style="green"))
-            logger.info("Transcription exported to %s", english_path)
+            console.print(Panel.fit(f"✅ Transcription saved to {transcript_path}", style="green"))
+            logger.info("Transcription exported to %s", transcript_path)
 
             success = True
             return
@@ -221,10 +283,10 @@ def run(
         initial_completed = len(translations_cache)
 
         def _progress_description(done: int) -> str:
-            return f"[bold cyan]Translating[/] {done}/{total_lines}"
+            return f"[{THEME_HIGHLIGHT}]Translating[/] {done}/{total_lines}"
 
         progress = Progress(
-            SpinnerColumn(style="cyan"),
+            SpinnerColumn(style=THEME_COLOR),
             TextColumn("{task.description}"),
             TaskProgressColumn(),
             console=console,
@@ -315,15 +377,16 @@ def run(
                     max_chars=max_trans_chars,
                     min_chars=min_trans_chars,
                 )
-            english_path = _write_document(
+            source_suffix = _source_language_suffix(config.whisper.language)
+            source_path = _write_document(
                 document=source_output_doc,
                 target_dir=Path(config.pipeline.output_dir),
                 stem=video.stem,
-                suffix=".en",
+                suffix=source_suffix,
                 output_format=config.pipeline.output_format,
             )
-            console.print(f"English subtitles saved to [italic]{english_path}[/]")
-            logger.info("English subtitles saved to %s", english_path)
+            console.print(f"Source subtitles saved to [italic]{source_path}[/]")
+            logger.info("Source subtitles saved to %s", source_path)
 
         success = True
 
@@ -439,27 +502,50 @@ def configure(
         ("View raw JSON", None),
     ]
 
+    dirty = False
     while True:
-        summary_lines = _config_summary_lines(config)
         console.clear()
-        console.print(
-            Panel(
-                "\n".join(summary_lines),
-                title="Transub configuration editor",
-                border_style="cyan",
-            )
+        _print_header(
+            subtitle="configuration editor",
+            body=_config_summary_table(config, manager.path),
         )
-        console.print("[bold]0.[/] Save & exit")
+        console.print()
+
+        console.print("[bold]Select an option:[/]")
+        menu = Table(
+            show_header=False,
+            box=box.SIMPLE_HEAD,
+            expand=False,
+            padding=(0, 1),
+        )
+        menu.add_column(style=THEME_HIGHLIGHT, justify="center", width=4)
+        menu.add_column(style="white", justify="left")
+        menu.add_row("0", "Save & exit")
+        menu.add_row("Q", "Exit without saving")
         for idx, (label, _) in enumerate(option_handlers, start=1):
-            console.print(f"[bold]{idx}.[/] {label}")
-        choice = Prompt.ask("Select an option", default="0")
+            menu.add_row(str(idx), label)
+        console.print(menu)
+
+        choice = Prompt.ask("Your choice", default="0").strip()
+        if not choice:
+            choice = "0"
+
+        if choice.lower() in {"q", "quit", "exit"}:
+            if dirty and not Confirm.ask("Discard unsaved changes?", default=False):
+                continue
+            console.clear()
+            console.print(Panel.fit("Changes discarded.", style="yellow"))
+            return
+
         if choice == "0":
             manager.save(config)
+            dirty = False
             console.clear()
             console.print(
                 Panel.fit(f"Configuration saved to {manager.path}", style="green")
             )
             return
+
         try:
             idx = int(choice)
         except ValueError:
@@ -471,166 +557,590 @@ def configure(
         label, handler = option_handlers[idx - 1]
         if handler is None:
             console.clear()
-            console.print(Panel(json.dumps(config.model_dump(mode="json"), indent=2, ensure_ascii=False), title="Raw configuration"))
+            console.print(
+                Panel(
+                    json.dumps(
+                        config.model_dump(mode="json"),
+                        indent=2,
+                        ensure_ascii=False,
+                    ),
+                    title="Raw configuration",
+                )
+            )
             _wait_for_enter()
         else:
             handler(config)
+            dirty = True
+
+
+BACK_TOKENS = {"back", "b", "上一步"}
+
+
+class BackAction(Exception):
+    """Signal that the wizard should move back one step."""
+
+
+@dataclass
+class WizardStep:
+    key: str
+    heading: str
+    description: Callable[[TransubConfig], Optional[str]]
+    handler: Callable[[TransubConfig], None]
+    condition: Callable[[TransubConfig], bool] = lambda _: True
+
+
+def _is_back(value: str) -> bool:
+    return value.strip().lower() in BACK_TOKENS or value.strip() == "上一步"
+
+
+
+def _wizard_step_body(title: str, description: Optional[str]) -> RenderableType:
+    lines: List[RenderableType] = [Text(title, style="bold white")]
+    if description:
+        lines.append(Text(description, style="white"))
+    lines.append(Text("Type 'back' to return to the previous step.", style="dim"))
+    return Padding(Group(*lines), (0, 0, 0, 0))
+
+
+def _wizard_ask_choice(prompt_text: str, choices: List[str], default: str) -> str:
+    choice_display = "/".join(choices)
+    normalized = [choice.lower() for choice in choices]
+    while True:
+        raw = Prompt.ask(
+            f"{prompt_text} ({choice_display})",
+            default=default,
+            show_choices=False,
+        )
+        if raw is None:
+            raw = ""
+        if _is_back(raw):
+            raise BackAction()
+        value = raw.strip()
+        if value.lower() in normalized:
+            return choices[normalized.index(value.lower())]
+        console.print(
+            "[red]Please choose one of the listed options, or type 'back' to return.[/]"
+        )
+
+
+def _wizard_ask_text(
+    prompt_text: str,
+    *,
+    default: str | None = None,
+    allow_blank: bool = True,
+    to_none: bool = False,
+) -> Optional[str]:
+    while True:
+        raw = Prompt.ask(
+            f"{prompt_text}",
+            default=default,
+            show_choices=False,
+        )
+        if raw is None:
+            raw = ""
+        if _is_back(raw):
+            raise BackAction()
+        value = raw.strip()
+        if not value and not allow_blank:
+            console.print("[red]This field cannot be empty.[/]")
+            continue
+        if to_none:
+            return value or None
+        return value if value or allow_blank else default
+
+
+def _wizard_ask_bool(prompt_text: str, default: bool) -> bool:
+    default_hint = "Y/n" if default else "y/N"
+    default_value = "y" if default else "n"
+    while True:
+        raw = Prompt.ask(
+            f"{prompt_text} ({default_hint})",
+            default=default_value,
+            show_choices=False,
+        )
+        if raw is None:
+            raw = default_value
+        if _is_back(raw):
+            raise BackAction()
+        value = raw.strip().lower()
+        if value in {"y", "yes"}:
+            return True
+        if value in {"n", "no"}:
+            return False
+        if not value:
+            return default
+        console.print("[red]Please enter y or n.[/]")
+
+
+def _wizard_ask_int(
+    prompt_text: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    while True:
+        raw = Prompt.ask(
+            f"{prompt_text} [{minimum}-{maximum}]",
+            default=str(default),
+            show_choices=False,
+        )
+        if raw is None:
+            raw = str(default)
+        if _is_back(raw):
+            raise BackAction()
+        try:
+            value = int(raw)
+        except ValueError:
+            console.print("[red]Please enter an integer value.[/]")
+            continue
+        if value < minimum or value > maximum:
+            console.print(
+                f"[red]Value must be between {minimum} and {maximum}.[/]"
+            )
+            continue
+        return value
+
+
+def _wizard_ask_optional_int(
+    prompt_text: str,
+    *,
+    current: Optional[int],
+    minimum: int,
+) -> Optional[int]:
+    default = "" if current is None else str(current)
+    while True:
+        raw = Prompt.ask(
+            f"{prompt_text} (leave blank for auto)",
+            default=default,
+            show_choices=False,
+        )
+        if raw is None:
+            raw = ""
+        if _is_back(raw):
+            raise BackAction()
+        value = raw.strip()
+        if not value:
+            return None
+        try:
+            parsed = int(value)
+        except ValueError:
+            console.print("[red]Please enter an integer or leave blank.[/]")
+            continue
+        if parsed < minimum:
+            console.print(f"[red]Value must be at least {minimum}.[/]")
+            continue
+        return parsed
+
+
+def _wizard_ask_json_dict(
+    prompt_text: str,
+    *,
+    default: dict,
+) -> dict:
+    default_text = json.dumps(default or {}, ensure_ascii=False)
+    while True:
+        raw = Prompt.ask(
+            f"{prompt_text} (JSON)",
+            default=default_text,
+            show_choices=False,
+        )
+        if raw is None:
+            raw = default_text
+        if _is_back(raw):
+            raise BackAction()
+        value = raw.strip()
+        if not value:
+            return {}
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            console.print("[red]Please enter a valid JSON object.[/]")
+            continue
+        if not isinstance(parsed, dict):
+            console.print("[red]The value must be a JSON object (key/value pairs).[/]")
+            continue
+        return parsed
+
+
+def _wizard_step_whisper_backend(config: TransubConfig) -> None:
+    choices = ["local", "api", "cpp", "mlx"]
+    backend = _wizard_ask_choice(
+        "Select backend",
+        choices,
+        config.whisper.backend,
+    )
+    config.whisper.backend = backend
+
+
+def _wizard_step_whisper_model(config: TransubConfig) -> None:
+    suggestions = WHISPER_MODEL_SUGGESTIONS.get(config.whisper.backend, [])
+    default_model = config.whisper.model or (suggestions[0] if suggestions else "base")
+    model = _wizard_ask_text(
+        "Model ID or path",
+        default=default_model,
+        allow_blank=False,
+    )
+    assert model
+    config.whisper.model = model
+
+
+def _wizard_step_whisper_device(config: TransubConfig) -> None:
+    device = _wizard_ask_text(
+        "Preferred device",
+        default=config.whisper.device or "",
+        to_none=True,
+    )
+    config.whisper.device = device
+
+
+def _wizard_step_whisper_language(config: TransubConfig) -> None:
+    language = _wizard_ask_text(
+        "Source language",
+        default=config.whisper.language or "en",
+        to_none=True,
+    )
+    config.whisper.language = language
+
+
+def _wizard_step_whisper_segmentation(config: TransubConfig) -> None:
+    config.whisper.tune_segmentation = _wizard_ask_bool(
+        "Enable segmentation tuning?",
+        config.whisper.tune_segmentation,
+    )
+
+
+def _wizard_step_whisper_initial_prompt(config: TransubConfig) -> None:
+    initial_prompt = _wizard_ask_text(
+        "Initial prompt for Whisper (optional)",
+        default=config.whisper.initial_prompt or "",
+        to_none=True,
+    )
+    config.whisper.initial_prompt = initial_prompt
+
+
+def _wizard_step_whisper_api(config: TransubConfig) -> None:
+    default_url = config.whisper.api_url or DEFAULT_OPENAI_TRANSCRIBE_URL
+    api_url = _wizard_ask_text(
+        "API URL",
+        default=default_url,
+        allow_blank=False,
+    )
+    api_key_env = _wizard_ask_text(
+        "API key environment variable",
+        default=config.whisper.api_key_env,
+        allow_blank=False,
+    )
+    config.whisper.api_url = api_url
+    config.whisper.api_key_env = api_key_env
+
+
+def _wizard_step_whisper_cpp(config: TransubConfig) -> None:
+    config.whisper.cpp_binary = _wizard_ask_text(
+        "whisper.cpp executable",
+        default=config.whisper.cpp_binary,
+        allow_blank=False,
+    )
+    config.whisper.cpp_model_path = _wizard_ask_text(
+        "Model file path (.bin/.gguf)",
+        default=config.whisper.cpp_model_path or "",
+        allow_blank=False,
+    )
+    config.whisper.cpp_threads = _wizard_ask_optional_int(
+        "Thread count",
+        current=config.whisper.cpp_threads,
+        minimum=1,
+    )
+    extra_args = _wizard_ask_text(
+        "Additional arguments (space separated)",
+        default=" ".join(config.whisper.cpp_extra_args) if config.whisper.cpp_extra_args else "",
+    )
+    config.whisper.cpp_extra_args = shlex.split(extra_args) if extra_args else []
+
+
+def _wizard_step_whisper_mlx(config: TransubConfig) -> None:
+    config.whisper.mlx_model_dir = _wizard_ask_text(
+        "Model directory",
+        default=config.whisper.mlx_model_dir or "",
+        to_none=True,
+    )
+    config.whisper.mlx_dtype = _wizard_ask_text(
+        "dtype (auto/float16/float32)",
+        default=config.whisper.mlx_dtype or "",
+        to_none=True,
+    )
+    config.whisper.mlx_device = _wizard_ask_text(
+        "Device (auto/mps/cpu)",
+        default=config.whisper.mlx_device or "",
+        to_none=True,
+    )
+    extra_args = _wizard_ask_json_dict(
+        "Extra arguments",
+        default=config.whisper.mlx_extra_args or {},
+    )
+    config.whisper.mlx_extra_args = extra_args
+
+
+def _wizard_step_llm_provider(config: TransubConfig) -> None:
+    config.llm.provider = _wizard_ask_text(
+        "LLM provider",
+        default=config.llm.provider,
+        allow_blank=False,
+    )
+    config.llm.model = _wizard_ask_text(
+        "LLM model",
+        default=config.llm.model,
+        allow_blank=False,
+    )
+    api_base = _wizard_ask_text(
+        "API base URL (leave blank for default)",
+        default=config.llm.api_base or "",
+        to_none=True,
+    )
+    config.llm.api_base = api_base
+    config.llm.api_key_env = _wizard_ask_text(
+        "API key environment variable",
+        default=config.llm.api_key_env,
+        allow_blank=False,
+    )
+
+
+def _wizard_step_llm_batch_and_style(config: TransubConfig) -> None:
+    config.llm.batch_size = _wizard_ask_int(
+        "Lines per translation batch",
+        default=config.llm.batch_size,
+        minimum=1,
+        maximum=50,
+    )
+    config.llm.target_language = _wizard_ask_text(
+        "Target language",
+        default=config.llm.target_language,
+        allow_blank=False,
+    )
+    style = _wizard_ask_text(
+        "Style description (optional)",
+        default=config.llm.style or "",
+        to_none=True,
+    )
+    config.llm.style = style
+
+
+def _wizard_step_pipeline_output(config: TransubConfig) -> None:
+    config.pipeline.output_format = _wizard_ask_choice(
+        "Subtitle format",
+        ["srt", "vtt"],
+        config.pipeline.output_format,
+    )
+    config.pipeline.audio_format = _wizard_ask_choice(
+        "Intermediate audio format",
+        ["wav", "mp3", "flac", "m4a", "ogg"],
+        config.pipeline.audio_format,
+    )
+    config.pipeline.output_dir = _wizard_ask_text(
+        "Output directory",
+        default=config.pipeline.output_dir,
+        allow_blank=False,
+    )
+    config.pipeline.keep_temp_audio = _wizard_ask_bool(
+        "Keep extracted audio file?",
+        config.pipeline.keep_temp_audio,
+    )
+    config.pipeline.save_source_subtitles = _wizard_ask_bool(
+        "Save source language subtitles?",
+        config.pipeline.save_source_subtitles,
+    )
+
+
+def _wizard_step_pipeline_limits(config: TransubConfig) -> None:
+    config.pipeline.max_chars_per_line = _wizard_ask_int(
+        "Maximum characters per source line",
+        default=config.pipeline.max_chars_per_line,
+        minimum=20,
+        maximum=160,
+    )
+    min_default = min(
+        config.pipeline.min_chars_per_line,
+        config.pipeline.max_chars_per_line,
+    )
+    config.pipeline.min_chars_per_line = _wizard_ask_int(
+        "Minimum characters per source line",
+        default=min_default,
+        minimum=10,
+        maximum=config.pipeline.max_chars_per_line,
+    )
+    translation_max_default = (
+        config.pipeline.translation_max_chars_per_line
+        if config.pipeline.translation_max_chars_per_line is not None
+        else 26
+    )
+    config.pipeline.translation_max_chars_per_line = _wizard_ask_int(
+        "Maximum characters per translated line",
+        default=translation_max_default,
+        minimum=10,
+        maximum=160,
+    )
+    translation_min_default = (
+        config.pipeline.translation_min_chars_per_line
+        if config.pipeline.translation_min_chars_per_line is not None
+        else 16
+    )
+    translation_min_default = min(
+        translation_min_default,
+        config.pipeline.translation_max_chars_per_line,
+    )
+    config.pipeline.translation_min_chars_per_line = _wizard_ask_int(
+        "Minimum characters per translated line",
+        default=translation_min_default,
+        minimum=1,
+        maximum=config.pipeline.translation_max_chars_per_line or 160,
+    )
+
+
+def _wizard_step_prompt(config: TransubConfig) -> None:
+    if _wizard_ask_bool("Open an editor to modify the translation prompt?", False):
+        edited = typer.edit(config.pipeline.prompt_preamble + "\n")
+        if edited:
+            config.pipeline.prompt_preamble = edited.strip()
+        return
+    custom = _wizard_ask_text(
+        "Custom system prompt (leave blank to keep default)",
+        default=config.pipeline.prompt_preamble,
+        allow_blank=True,
+    )
+    if custom and custom.strip():
+        config.pipeline.prompt_preamble = custom.strip()
 
 
 def _prompt_for_config() -> TransubConfig:
-    console.print("We'll gather a few preferences. Press enter to accept defaults.")
-    whisper_backend = Prompt.ask(
-        "Whisper backend", choices=["local", "api", "cpp", "mlx"], default="local"
-    )
-    model_suggestions = WHISPER_MODEL_SUGGESTIONS.get(whisper_backend, [])
-    default_model = "base"
-    if model_suggestions:
-        default_model = model_suggestions[0]
-        console.print(
-            f"Suggested models for backend '{whisper_backend}': "
-            + ", ".join(model_suggestions)
-        )
-    whisper_model = Prompt.ask(
-        "Whisper model id or path", default=default_model, show_choices=False
-    )
-    whisper_device = Prompt.ask(
-        "Preferred device (cuda/cpu/mps)", default="", show_choices=False
-    )
-    whisper_language = Prompt.ask("Source language hint", default="en")
-    whisper_tune_segmentation = Confirm.ask(
-        "Enable Whisper segmentation tuning (reduce fragmenting)?", default=True
-    )
-    whisper_initial_prompt = Prompt.ask(
-        "Whisper initial prompt (optional, useful for terminology)", default="", show_choices=False
-    )
+    config = TransubConfig()
+    steps: List[WizardStep] = [
+        WizardStep(
+            "whisper-backend",
+            "Whisper Backend",
+            lambda _cfg: "Choose where Whisper will run.",
+            _wizard_step_whisper_backend,
+        ),
+        WizardStep(
+            "whisper-model",
+            "Whisper Model",
+            lambda cfg: (
+                "Suggested models: " + ", ".join(WHISPER_MODEL_SUGGESTIONS.get(cfg.whisper.backend, []))
+            )
+            if WHISPER_MODEL_SUGGESTIONS.get(cfg.whisper.backend)
+            else "Provide the model identifier or path.",
+            _wizard_step_whisper_model,
+        ),
+        WizardStep(
+            "whisper-device",
+            "Compute Device",
+            lambda _cfg: "Optional: cuda / cpu / mps. Leave blank to auto-detect.",
+            _wizard_step_whisper_device,
+        ),
+        WizardStep(
+            "whisper-language",
+            "Language Hint",
+            lambda _cfg: "Enter a language code (for example, en) or leave blank for auto detection.",
+            _wizard_step_whisper_language,
+        ),
+        WizardStep(
+            "whisper-tune",
+            "Segmentation Tuning",
+            lambda _cfg: "Enable this to reduce fragmented subtitles.",
+            _wizard_step_whisper_segmentation,
+        ),
+        WizardStep(
+            "whisper-initial",
+            "Initial Prompt",
+            lambda _cfg: "Optional text to help Whisper with terminology or role-playing.",
+            _wizard_step_whisper_initial_prompt,
+        ),
+        WizardStep(
+            "whisper-api",
+            "Whisper API",
+            lambda _cfg: "Configure your remote transcription endpoint.",
+            _wizard_step_whisper_api,
+            lambda cfg: cfg.whisper.backend == "api",
+        ),
+        WizardStep(
+            "whisper-cpp",
+            "whisper.cpp Options",
+            lambda _cfg: "Specify the executable, model path, and extra parameters.",
+            _wizard_step_whisper_cpp,
+            lambda cfg: cfg.whisper.backend == "cpp",
+        ),
+        WizardStep(
+            "whisper-mlx",
+            "mlx-whisper Options",
+            lambda _cfg: "Provide optional model directory and advanced arguments.",
+            _wizard_step_whisper_mlx,
+            lambda cfg: cfg.whisper.backend == "mlx",
+        ),
+        WizardStep(
+            "llm-provider",
+            "Translation Model",
+            lambda _cfg: "Configure which LLM performs translation.",
+            _wizard_step_llm_provider,
+        ),
+        WizardStep(
+            "llm-batch",
+            "Translation Parameters",
+            lambda _cfg: "Adjust batch size, target language, and style.",
+            _wizard_step_llm_batch_and_style,
+        ),
+        WizardStep(
+            "pipeline-output",
+            "Output Settings",
+            lambda _cfg: "Pick subtitle format, output directory, and caching options.",
+            _wizard_step_pipeline_output,
+        ),
+        WizardStep(
+            "pipeline-limits",
+            "Subtitle Length Limits",
+            lambda _cfg: "Control character counts for source and translated subtitles.",
+            _wizard_step_pipeline_limits,
+        ),
+        WizardStep(
+            "prompt",
+            "Translation Prompt",
+            lambda _cfg: "Edit the system prompt or keep the default template.",
+            _wizard_step_prompt,
+        ),
+    ]
 
-    llm_provider = Prompt.ask("LLM provider name", default="openai")
-    llm_model = Prompt.ask("LLM model id", default="gpt-4o-mini")
-    llm_api_base = Prompt.ask("LLM API base URL (blank for default)", default="")
-    llm_api_key_env = Prompt.ask("LLM API key env var", default="OPENAI_API_KEY")
-    llm_batch_size = _prompt_int("Lines per translation batch", default=5, minimum=1, maximum=50)
-    target_language = Prompt.ask("Target language", default="zh")
-    translation_style = Prompt.ask(
-        "Desired style (e.g. Simplified Chinese/Traditional Chinese/Colloquial)", default="Simplified Chinese"
-    )
+    idx = 0
+    history: List[int] = []
 
-    output_format = Prompt.ask("Output subtitle format", choices=["srt", "vtt"], default="srt")
-    audio_format = Prompt.ask(
-        "Intermediate audio format", choices=["wav", "mp3", "flac", "m4a", "ogg"], default="wav"
-    )
-    output_dir = Prompt.ask("Output directory", default="./output")
-    keep_temp = Confirm.ask("Keep extracted audio file?", default=False)
-    save_source = Confirm.ask("Save English subtitles as well?", default=True)
-    max_chars = _prompt_int("Max characters per subtitle line", default=54, minimum=20, maximum=160)
-    min_chars = _prompt_int(
-        "Min characters per subtitle line", default=22, minimum=10, maximum=max_chars
-    )
-    translation_max_chars = _prompt_int(
-        "Max characters per translated line", default=26, minimum=10, maximum=160
-    )
-    translation_min_chars = _prompt_int(
-        "Min characters per translated line", default=16, minimum=1, maximum=translation_max_chars
-    )
+    while idx < len(steps):
+        step = steps[idx]
+        if not step.condition(config):
+            idx += 1
+            continue
 
-    default_prompt = DEFAULT_TRANSLATION_PROMPT
-    if Confirm.ask("Open editor for system prompt? (multi-line supported)", default=False):
-        edited = typer.edit(default_prompt + "\n")
-        pipeline_prompt = (edited or default_prompt).strip()
-    else:
-        pipeline_prompt = Prompt.ask(
-            "Custom system prompt for translation",
-            default=default_prompt,
-        )
+        active_indices = [i for i, s in enumerate(steps) if s.condition(config)]
+        step_position = active_indices.index(idx) + 1
+        total_steps = len(active_indices)
 
-    whisper_config: dict[str, object] = {
-        "backend": whisper_backend,
-        "model": whisper_model,
-        "device": whisper_device or None,
-        "language": whisper_language or None,
-        "api_key_env": "OPENAI_API_KEY",
-        "tune_segmentation": whisper_tune_segmentation,
-        "initial_prompt": whisper_initial_prompt or None,
-    }
-    if whisper_backend == "api":
-        whisper_api_url = Prompt.ask(
-            "Whisper API URL", default="https://api.openai.com/v1/audio/transcriptions"
-        )
-        whisper_api_key_env = Prompt.ask(
-            "Whisper API key env var", default="OPENAI_API_KEY"
-        )
-        whisper_config["api_url"] = whisper_api_url
-        whisper_config["api_key_env"] = whisper_api_key_env
-    elif whisper_backend == "cpp":
-        cpp_binary = Prompt.ask(
-            "whisper.cpp executable name or path", default="whisper-cpp"
-        )
-        cpp_model_path = _prompt_non_empty(
-            "whisper.cpp model file path (.bin/.gguf)", default=""
-        )
-        cpp_threads = _prompt_optional_int(
-            "whisper.cpp thread count (leave blank for auto)", minimum=1
-        )
-        cpp_extra_args_raw = Prompt.ask(
-            "Extra whisper.cpp CLI arguments (space separated, optional)", default=""
-        )
-        cpp_extra_args = shlex.split(cpp_extra_args_raw) if cpp_extra_args_raw else []
-        whisper_config.update(
-            {
-                "cpp_binary": cpp_binary,
-                "cpp_model_path": cpp_model_path,
-                "cpp_threads": cpp_threads,
-                "cpp_extra_args": cpp_extra_args,
-            }
-        )
-    elif whisper_backend == "mlx":
-        mlx_model_dir = Prompt.ask("mlx-whisper model directory (optional)", default="")
-        mlx_dtype = Prompt.ask("mlx-whisper dtype (auto/float16/float32, optional)", default="")
-        mlx_device = Prompt.ask("mlx-whisper device (auto/mps/cpu, optional)", default="")
-        mlx_extra_args = _prompt_json_dict(
-            "Extra mlx-whisper arguments (JSON object, optional)", default="{}"
-        )
-        whisper_config.update(
-            {
-                "mlx_model_dir": mlx_model_dir or None,
-                "mlx_dtype": mlx_dtype or None,
-                "mlx_device": mlx_device or None,
-                "mlx_extra_args": mlx_extra_args,
-            }
-        )
+        console.clear()
+        description = step.description(config)
+        body = _wizard_step_body(step.heading, description)
+        _print_header(subtitle=f"setup {step_position}/{total_steps}", body=body)
 
-    llm_config = {
-        "provider": llm_provider,
-        "model": llm_model,
-        "api_base": llm_api_base or None,
-        "api_key_env": llm_api_key_env,
-        "batch_size": llm_batch_size,
-        "target_language": target_language,
-        "style": translation_style or None,
-    }
+        try:
+            step.handler(config)
+            history.append(idx)
+            idx += 1
+        except BackAction:
+            if history:
+                idx = history.pop()
+                continue
+            console.print("[yellow]You are already at the first step; cannot go back further.[/]")
+            _wait_for_enter()
+            idx = 0
 
-    pipeline_config = {
-        "output_format": output_format,
-        "audio_format": audio_format,
-        "output_dir": output_dir,
-        "keep_temp_audio": keep_temp,
-        "save_source_subtitles": save_source,
-        "max_chars_per_line": max_chars,
-        "min_chars_per_line": min_chars,
-        "translation_max_chars_per_line": translation_max_chars,
-        "translation_min_chars_per_line": translation_min_chars,
-        "prompt_preamble": pipeline_prompt,
-    }
-
-    data = {
-        "whisper": whisper_config,
-        "llm": llm_config,
-        "pipeline": pipeline_config,
-    }
-    return TransubConfig.model_validate(data)
+    return config
 
 
 def _run_wizard(manager: ConfigManager, allow_overwrite: bool) -> None:
-    console.print(Panel.fit("Transub setup assistant", style="bold cyan"))
     if manager.exists():
         if not allow_overwrite:
             console.print("Configuration untouched.")
@@ -652,15 +1162,50 @@ def _run_wizard(manager: ConfigManager, allow_overwrite: bool) -> None:
     )
 
 
-def _config_summary_lines(config: TransubConfig) -> list[str]:
+def _key_value_table(rows: List[tuple[str, RenderableType]]) -> Table:
+    table = Table.grid(padding=(0, 1))
+    table.add_column(style="dim", no_wrap=True)
+    table.add_column(style="white", ratio=1)
+    for key, value in rows:
+        table.add_row(key, value)
+    return table
+
+
+def _config_summary_table(config: TransubConfig, path: Path) -> Table:
     whisper = config.whisper
     llm = config.llm
     pipeline = config.pipeline
-    return [
-        f"[bold]Whisper[/]: backend={whisper.backend} | model={whisper.model} | device={whisper.device or 'auto'} | language={whisper.language or 'auto'}",
-        f"[bold]LLM[/]: provider={llm.provider} | model={llm.model} | target={llm.target_language} | batch_size={llm.batch_size}",
-        f"[bold]Pipeline[/]: format={pipeline.output_format} | audio={pipeline.audio_format} | dir={pipeline.output_dir} | keep_audio={_fmt_bool(pipeline.keep_temp_audio)} | save_en={_fmt_bool(pipeline.save_source_subtitles)} | max_line={pipeline.max_chars_per_line} | translated_max={pipeline.translation_max_chars_per_line}",
+    rows = [
+        ("config", str(path)),
+        (
+            "whisper",
+            (
+                f"backend={whisper.backend} | model={whisper.model} | "
+                f"device={whisper.device or 'auto'} | language={whisper.language or 'auto'}"
+            ),
+        ),
+        (
+            "llm",
+            (
+                f"provider={llm.provider} | model={llm.model} | target={llm.target_language} | batch={llm.batch_size}"
+            ),
+        ),
+        (
+            "pipeline",
+            (
+                f"format={pipeline.output_format} | audio={pipeline.audio_format} | dir={pipeline.output_dir} | "
+                f"keep_audio={_fmt_bool(pipeline.keep_temp_audio)} | save_en={_fmt_bool(pipeline.save_source_subtitles)}"
+            ),
+        ),
+        (
+            "limits",
+            (
+                f"max_line={pipeline.max_chars_per_line} | min_line={pipeline.min_chars_per_line} | "
+                f"translated_max={pipeline.translation_max_chars_per_line} | translated_min={pipeline.translation_min_chars_per_line}"
+            ),
+        ),
     ]
+    return _key_value_table(rows)
 
 
 def _wait_for_enter(message: str = "Press Enter to continue...") -> None:
@@ -689,7 +1234,7 @@ def _configure_whisper_backend(config: TransubConfig) -> None:
                 f"mlx_model_dir: {whisper.mlx_model_dir or '(auto)'} | dtype: {whisper.mlx_dtype or 'auto'} | device: {whisper.mlx_device or 'auto'}"
             )
         console.print(
-            Panel("\\n".join(summary_lines), title="Whisper backend & model", border_style="cyan")
+            Panel("\\n".join(summary_lines), title="Whisper backend & model", border_style=THEME_COLOR)
         )
 
         options = [
@@ -845,7 +1390,7 @@ def _configure_whisper_advanced(config: TransubConfig) -> None:
             f"Condition on previous text: {_fmt_bool(bool(whisper.condition_on_previous_text))} | Initial prompt: {whisper.initial_prompt or '(none)'}",
         ]
         console.print(
-            Panel("\\n".join(summary_lines), title="Whisper advanced parameters", border_style="cyan")
+            Panel("\\n".join(summary_lines), title="Whisper advanced parameters", border_style=THEME_COLOR)
         )
 
         options = [
@@ -916,7 +1461,7 @@ def _configure_llm(config: TransubConfig) -> None:
             f"Temperature: {llm.temperature} | Max retries: {llm.max_retries} | Timeout: {llm.request_timeout}s",
             f"API base: {llm.api_base or '(default)'} | API key env: {llm.api_key_env} | Style: {llm.style or '(none)'}",
         ]
-        console.print(Panel("\\n".join(summary_lines), title="Translation LLM", border_style="cyan"))
+        console.print(Panel("\\n".join(summary_lines), title="Translation LLM", border_style=THEME_COLOR))
 
         options = [
             ("Change provider", "provider"),
@@ -1001,21 +1546,21 @@ def _configure_pipeline(config: TransubConfig) -> None:
         summary_lines = [
             f"Format: {pipeline.output_format} | Audio: {pipeline.audio_format}",
             f"Output dir: {pipeline.output_dir}",
-            f"Keep temp audio: {_fmt_bool(pipeline.keep_temp_audio)} | Save English: {_fmt_bool(pipeline.save_source_subtitles)}",
+            f"Keep temp audio: {_fmt_bool(pipeline.keep_temp_audio)} | Save source subtitles: {_fmt_bool(pipeline.save_source_subtitles)}",
             f"Max line chars: {pipeline.max_chars_per_line} (min {pipeline.min_chars_per_line})",
             f"Translated max: {pipeline.translation_max_chars_per_line} (min {pipeline.translation_min_chars_per_line})",
             f"Timing trim: {pipeline.timing_trim_seconds}s | Offset: {pipeline.timing_offset_seconds}s | Minimum duration: {pipeline.min_line_duration}s",
             f"Trim punctuation: {_fmt_bool(pipeline.remove_trailing_punctuation)} | CJK spacing: {_fmt_bool(pipeline.normalize_cjk_spacing)}",
-            f"Refine English export: {_fmt_bool(pipeline.refine_source_subtitles)}",
+            f"Refine source export: {_fmt_bool(pipeline.refine_source_subtitles)}",
         ]
-        console.print(Panel("\\n".join(summary_lines), title="Pipeline & output", border_style="cyan"))
+        console.print(Panel("\\n".join(summary_lines), title="Pipeline & output", border_style=THEME_COLOR))
 
         options = [
             ("Set output format", "format"),
             ("Set audio format", "audio"),
             ("Set output directory", "dir"),
             ("Toggle keep temp audio", "keep"),
-            ("Toggle save English subtitles", "save"),
+            ("Toggle save source subtitles", "save"),
             ("Set max characters per line", "max_line"),
             ("Set min characters per line", "min_line"),
             ("Set translated max characters", "tmax"),
@@ -1025,7 +1570,7 @@ def _configure_pipeline(config: TransubConfig) -> None:
             ("Set minimum line duration", "duration"),
             ("Toggle remove trailing punctuation", "punct"),
             ("Toggle CJK-Latin spacing", "spacing"),
-            ("Toggle refine English export", "refine_en"),
+            ("Toggle refine source export", "refine_en"),
             ("Edit translation system prompt", "prompt"),
         ]
         for idx, (label, _) in enumerate(options, start=1):
@@ -1065,7 +1610,7 @@ def _configure_pipeline(config: TransubConfig) -> None:
             )
         elif key == "save":
             pipeline.save_source_subtitles = Confirm.ask(
-                "Save English subtitles?",
+                "Save source subtitles?",
                 default=pipeline.save_source_subtitles,
             )
         elif key == "max_line":
@@ -1126,12 +1671,12 @@ def _configure_pipeline(config: TransubConfig) -> None:
             )
         elif key == "spacing":
             pipeline.normalize_cjk_spacing = Confirm.ask(
-                "Insert spaces between Chinese characters and Latin/digit text?",
+                "Insert spaces between CJK characters and Latin/digit text?",
                 default=pipeline.normalize_cjk_spacing,
             )
         elif key == "refine_en":
             pipeline.refine_source_subtitles = Confirm.ask(
-                "Re-refine English subtitles when exporting?",
+                "Re-refine source subtitles when exporting?",
                 default=pipeline.refine_source_subtitles,
             )
         elif key == "prompt":
@@ -1250,6 +1795,13 @@ def _language_suffix(language: Optional[str]) -> str:
     if not normalized:
         return ""
     return f".{normalized}"
+
+
+def _source_language_suffix(language: Optional[str]) -> str:
+    if not language or language.strip().lower() in {"", "auto"}:
+        return ".src"
+    suffix = _language_suffix(language)
+    return suffix or ".src"
 
 
 def _cleanup_audio_file(work_dir: Path, audio_path: Optional[Path]) -> None:

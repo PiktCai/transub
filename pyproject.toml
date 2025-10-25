@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "transub"
 version = "0.1.0"
-description = "CLI tool to generate Chinese subtitles for English videos"
+description = "CLI tool to transcribe and translate subtitles from videos"
 authors = [{ name = "Transub Authors" }]
 requires-python = ">=3.10"
 dependencies = [

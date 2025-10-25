@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -40,6 +41,19 @@ class DownloadProgressBar(tqdm):
 
 
 DOWNLOAD_CONSOLE = Console()
+
+
+@contextmanager
+def _suppress_tqdm() -> Any:
+    previous = os.environ.get("TQDM_DISABLE")
+    os.environ["TQDM_DISABLE"] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("TQDM_DISABLE", None)
+        else:
+            os.environ["TQDM_DISABLE"] = previous
 
 
 def transcribe_audio(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
@@ -115,7 +129,8 @@ def _transcribe_local(audio_path: Path, config: WhisperConfig) -> SubtitleDocume
         ) from exc
 
     device = config.device or None
-    model = whisper.load_model(config.model, device=device)
+    with _suppress_tqdm():
+        model = whisper.load_model(config.model, device=device)
     transcribe_kwargs: Dict[str, Any] = dict(config.extra_args)
     if config.language:
         transcribe_kwargs.setdefault("language", config.language)

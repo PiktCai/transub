@@ -26,7 +26,7 @@ DEFAULT_TRANSLATION_PROMPT = dedent(
     3. Use punctuation (comma, period, ellipsis) to preserve rhythm and tone.
     4. Translate terminology accurately and keep it consistent across lines.
     5. Use straight quotes instead of curly quotes.
-    6. Insert spaces between Chinese and English words, and between Chinese characters and numbers.
+    6. When the translation mixes different scripts (for example, Latin letters within Chinese text), add spacing where appropriate so the subtitle stays legible.
 
     # Output Format
     1. Return a JSON object that mirrors the input keys (IDs) and only translates the values.
@@ -257,7 +257,7 @@ class PipelineConfig(BaseModel):
     )
     refine_source_subtitles: bool = Field(
         default=False,
-        description="Whether to re-refine and reflow English source subtitles on export",
+        description="Whether to re-refine and reflow source subtitles on export",
     )
 
     @model_validator(mode="after")
