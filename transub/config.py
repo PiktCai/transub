@@ -26,8 +26,7 @@ DEFAULT_TRANSLATION_PROMPT = dedent(
     3. Use punctuation (comma, period, ellipsis) to preserve rhythm and tone.
     4. Translate terminology accurately and keep it consistent across lines.
     5. Use straight quotes instead of curly quotes.
-    6. Remove any trailing punctuation from each translated line.
-    7. Insert spaces between Chinese and English words, and between Chinese characters and numbers.
+    6. Insert spaces between Chinese and English words, and between Chinese characters and numbers.
 
     # Output Format
     1. Return a JSON object that mirrors the input keys (IDs) and only translates the values.

@@ -481,15 +481,15 @@ def _prompt_for_config() -> TransubConfig:
     output_dir = Prompt.ask("Output directory", default="./output")
     keep_temp = Confirm.ask("Keep extracted audio file?", default=False)
     save_source = Confirm.ask("Save English subtitles as well?", default=True)
-    max_chars = _prompt_int("Max characters per subtitle line", default=60, minimum=20, maximum=160)
+    max_chars = _prompt_int("Max characters per subtitle line", default=54, minimum=20, maximum=160)
     min_chars = _prompt_int(
-        "Min characters per subtitle line", default=25, minimum=10, maximum=max_chars
+        "Min characters per subtitle line", default=22, minimum=10, maximum=max_chars
     )
     translation_max_chars = _prompt_int(
-        "Max characters per translated line", default=36, minimum=10, maximum=160
+        "Max characters per translated line", default=26, minimum=10, maximum=160
     )
     translation_min_chars = _prompt_int(
-        "Min characters per translated line", default=4, minimum=1, maximum=translation_max_chars
+        "Min characters per translated line", default=16, minimum=1, maximum=translation_max_chars
     )
 
     default_prompt = DEFAULT_TRANSLATION_PROMPT
