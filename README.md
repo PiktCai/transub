@@ -2,80 +2,168 @@
 
 [中文说明](README.zh-CN.md)
 
-Transub is a Typer-based CLI that automates the journey from **video** to **Chinese subtitles**. It extracts audio with `ffmpeg`, transcribes English speech via Whisper (local, mlx, whisper.cpp, or API backends), and batches subtitle translation through an LLM. Post-processing keeps line breaks natural, timing aligned, and CJK/Latin spacing consistent.
+Automate the journey from **video** to **Chinese subtitles** with a single Typer command. Transub extracts audio with `ffmpeg`, runs Whisper for transcription, and applies an LLM-driven translation pipeline that keeps punctuation, timing, and CJK/Latin spacing polished.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Quick Start](#quick-start)
+  - [Before You Begin](#before-you-begin)
+  - [Windows (PowerShell, Local Whisper)](#windows-powershell-local-whisper)
+  - [macOS (Apple Silicon, mlx-whisper)](#macos-apple-silicon-mlx-whisper)
+  - [Linux (Bash, Local Whisper)](#linux-bash-local-whisper)
+- [Configuration Overview](#configuration-overview)
+- [CLI Cheatsheet](#cli-cheatsheet)
+- [Development](#development)
+- [Project Layout](#project-layout)
+- [License](#license)
+
+## Overview
+
+Transub orchestrates a reproducible pipeline:
+
+1. Extract audio from a video with `ffmpeg`.
+2. Transcribe speech via Whisper (local, mlx, whisper.cpp, or API).
+3. Translate subtitle batches with JSON-constrained prompts.
+4. Emit `.srt` or `.vtt` files with tuned line breaks and timing.
+
+Intermediate state is cached so interrupted runs can resume without repeating earlier steps.
 
 ## Key Features
 
-- **End-to-end pipeline**: `transub run <video.mp4>` handles audio extraction → transcription → translation → subtitle export.
-- **Backend flexibility**: choose from local Whisper models, `mlx-whisper`, `whisper.cpp`, or OpenAI-compatible APIs.
-- **Robust translation**: JSON-constrained prompts, retry logic, and configurable batch sizes keep LLM output reliable.
-- **Subtitle polishing**: punctuation-aware line splitting, configurable min/max line length, timing offsets, and automatic spacing between Chinese and Latin characters.
-- **Stateful execution**: cached artifacts enable resuming partially completed runs; generated outputs live in `./output`.
+- **End-to-end pipeline** — `transub run <video.mp4>` handles extraction → transcription → translation → export.
+- **Multiple transcription backends** — choose local Whisper, `mlx-whisper`, `whisper.cpp`, or OpenAI-compatible APIs.
+- **Reliable translations** — JSON-constrained prompts, retry logic, and configurable batch sizes.
+- **Subtitle polishing** — punctuation-aware line splitting, timing offsets, and automatic spacing between Chinese and Latin characters.
+- **Stateful execution** — cached progress in `.transub/` avoids rework across runs.
 
 ## Quick Start
 
-### Prerequisites
+### Before You Begin
 
-- Python 3.10+
-- `ffmpeg`
-- A compatible translation API (default: OpenRouter / DeepSeek)
-- Optional: install `mlx-whisper`, `openai-whisper`, or `whisper.cpp` depending on your transcription backend
+- **Python 3.10+** installed on your system.
+- **ffmpeg** available on `PATH`.
+- **LLM API access** (default config expects an OpenAI-compatible endpoint; set the `api_key_env` variable in `transub.conf` to match your environment).
+- Enough disk space for temporary audio and transcription artifacts under `./.transub/`.
 
-### Installation
+Follow the guide for your platform to install dependencies and select the recommended Whisper backend.
 
-```bash
-git clone https://github.com/PiktCai/transub.git
-cd transub
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
+### Windows (PowerShell, Local Whisper)
 
-### Generate Your First Subtitles
+1. **Install prerequisites**
+   - [Python 3.10+](https://www.python.org/downloads/windows/)
+   - `ffmpeg`: `winget install Gyan.FFmpeg` or `choco install ffmpeg`
+2. **Clone and create a virtual environment**
+   ```powershell
+   git clone https://github.com/PiktCai/transub.git
+   cd transub
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -e .
+   pip install openai-whisper
+   ```
+   Install a CUDA-enabled PyTorch wheel if GPU acceleration is desired.
+3. **Configure Transub**
+   ```powershell
+   transub init
+   ```
+   Keep `backend = "local"` in `[whisper]` and select a model such as `small` or `medium`.
+4. **Run the pipeline**
+   ```powershell
+   transub run .\video.mp4 --work-dir .\.transub
+   ```
+   Subtitles are written to `.\output\` (e.g., `video.zh_cn.srt`, `video.en.srt`).
 
-```bash
-transub init           # guided configuration wizard (creates transub.conf)
-transub run video.mp4  # produce zh/en subtitles under ./output
-```
+### macOS (Apple Silicon, mlx-whisper)
 
-Outputs:
+1. **Install prerequisites**
+   - Python 3.10+ (`brew install python@3.11` if needed)
+   - `ffmpeg`: `brew install ffmpeg`
+2. **Clone and set up the environment**
+   ```bash
+   git clone https://github.com/PiktCai/transub.git
+   cd transub
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -e .
+   pip install mlx-whisper
+   ```
+   `mlx-whisper` runs Whisper efficiently on Apple Silicon GPUs/NPUs.
+3. **Configure Transub**
+   ```bash
+   transub init
+   ```
+   Set `backend = "mlx"` in `[whisper]`; choose a model like `mlx-community/whisper-small.en-mlx` and optionally supply `mlx_model_dir` for local weights.
+4. **Run the pipeline**
+   ```bash
+   transub run ./video.mp4 --work-dir ./.transub
+   ```
+   Subtitles appear in `./output/` as `.srt` or `.vtt` depending on your configuration.
 
-- `video.zh_cn.srt` – translated subtitles with normalized spacing.
-- `video.en.srt` – English transcription (configurable).
+### Linux (Bash, Local Whisper)
 
-## Configuration
+1. **Install prerequisites**
+   ```bash
+   sudo apt update && sudo apt install ffmpeg python3 python3-venv  # Debian/Ubuntu
+   # Arch: sudo pacman -S ffmpeg python python-virtualenv
+   ```
+2. **Clone and create a virtual environment**
+   ```bash
+   git clone https://github.com/PiktCai/transub.git
+   cd transub
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -e .
+   pip install openai-whisper
+   ```
+   Install an appropriate PyTorch wheel (`pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118`) if your GPU should accelerate Whisper.
+3. **Configure Transub**
+   ```bash
+   transub init
+   ```
+   Use the wizard with `backend = "local"` and pick a Whisper model that fits your hardware.
+4. **Run the pipeline**
+   ```bash
+   transub run ./video.mp4 --work-dir ./.transub
+   ```
+   Generated subtitles are saved under `./output/`.
 
-All runtime options live in `transub.conf` (TOML). Important sections:
+> Tip: Clear the `.transub/` work directory between experiments if you switch videos or Whisper configurations to avoid stale caches.
 
-- `[whisper]` – backend selection, model name, device, advanced parameters.
-- `[llm]` – translation provider/model, temperature, batch size, retry policy.
-- `[pipeline]` – output format, line-length targets, timing trim/offset, punctuation removal, CJK spacing.
+## Configuration Overview
 
-Example snippet:
+Runtime settings live in `transub.conf` (TOML). Key sections:
+
+- `[whisper]` — backend selection, model name, device overrides, and extra arguments.
+- `[llm]` — translation provider/model, temperature, batch size, retry policy.
+- `[pipeline]` — output format, line-length targets, timing trim/offset, punctuation and spacing options.
+
+Example:
 
 ```toml
 [pipeline]
 output_format = "srt"
-timing_offset_seconds = 0.05
 translation_max_chars_per_line = 26
 translation_min_chars_per_line = 16
 normalize_cjk_spacing = true
+timing_offset_seconds = 0.05
 ```
 
-Use `transub configure` to adjust these interactively, or edit the file directly.
+Run `transub configure` for an interactive editor, or update the file manually. Configuration files are user-specific and should not be committed.
 
-## CLI Essentials
+## CLI Cheatsheet
 
 ```bash
 transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub
 transub show_config
-transub init --config ./transub.conf        # rerun the setup wizard
-transub configure                           # tweak an existing config
+transub init --config ./transub.conf   # rerun the setup wizard
+transub configure                      # edit an existing config
 ```
 
-Cache directory `.transub/` stores intermediate state (audio cache, transcription JSON, translation progress). If a run fails or you cancel midway, the next `transub run` resumes from that state.
+Cache directory `.transub/` stores audio, transcription segments, translation progress, and pipeline state. If a run is interrupted, re-running the same command resumes where it left off.
 
-## Development Workflow
+## Development
 
 ```bash
 python -m venv .venv
@@ -84,9 +172,9 @@ pip install -e ".[dev]"
 python -m unittest
 ```
 
-- Core modules live under `transub/` (`cli.py`, `config.py`, `transcribe.py`, `translate.py`, `subtitles.py`).
-- Add feature-specific tests under `transub/test_subtitles.py` or a new module in `tests/`.
-- Keep CLI messages styled via Rich; reuse shared helpers for logging (`transub.logger`).
+- Source lives in `transub/` (`cli.py`, `config.py`, `transcribe.py`, `translate.py`, `subtitles.py`, etc.).
+- Add tests beside related modules (e.g., `transub/test_subtitles.py`).
+- Use Rich console utilities and `transub.logger.setup_logging` for consistent output.
 
 ## Project Layout
 
@@ -103,5 +191,5 @@ transub/
 
 ## License
 
-This project is shared for personal use and study; there is no formal contribution process at this time.  
+This project is distributed for personal use and study; there is no formal contribution process at this time.  
 Transub is released under the [MIT License](LICENSE).

@@ -2,54 +2,142 @@
 
 [English README](README.md)
 
-Transub 是一个基于 Typer 的命令行工具，可将英文视频自动转换成高质量的中文字幕。它集成了音频提取、Whisper 转写和 LLM 翻译，最终生成经过排版优化的字幕文件。
+Transub 通过 Typer 命令行，将 **视频** 自动转换为 **中文字幕**：使用 `ffmpeg` 抽取音频，借助 Whisper 完成英文转写，并由 LLM 生成符合字幕排版规范的翻译文本，保持断句、时间轴与中英文间距的自然舒适。
+
+## 目录
+
+- [概览](#概览)
+- [功能亮点](#功能亮点)
+- [快速开始](#快速开始)
+  - [准备工作](#准备工作)
+  - [Windows（PowerShell，本地 Whisper）](#windowspowershell本地-whisper)
+  - [macOS（Apple Silicon，mlx-whisper）](#macosapple-siliconmlx-whisper)
+  - [Linux（Bash，本地 Whisper）](#linuxbash本地-whisper)
+- [配置总览](#配置总览)
+- [常用命令速查](#常用命令速查)
+- [开发者指南](#开发者指南)
+- [目录结构](#目录结构)
+- [许可协议](#许可协议)
+
+## 概览
+
+Transub 的标准流水线如下：
+
+1. 使用 `ffmpeg` 从视频中提取音频。
+2. 通过 Whisper（本地、mlx、whisper.cpp 或 API）生成英文转写。
+3. 将字幕分批发送给 LLM，使用 JSON 约束确保输出稳定。
+4. 输出 `.srt` / `.vtt` 文件，控制行长、断句和时间轴偏移。
+
+所有中间状态都会写入工作目录，意外中断后可以就地恢复。
 
 ## 功能亮点
 
-- **一键处理流程**：执行 `transub run <视频文件>` 即可完成音频提取 → 转写 → 翻译 → 导出。
-- **多种后端支持**：本地 Whisper、`mlx-whisper`、`whisper.cpp` 以及兼容 OpenAI 的 API。
-- **稳定的翻译输出**：批量 JSON 约束、自动重试、可调节的译文分段长度。
-- **字幕排版优化**：中文断句、最小/最大行长限制、时间轴偏移、自动在中英文字符之间补空格。
-- **断点续跑**：缓存目录 `.transub/` 保存执行状态，支持在失败或中断后继续。
+- **一键处理**：`transub run <视频文件>` 即可完成提取 → 转写 → 翻译 → 导出。
+- **多种 Whisper 后端**：支持本地 Whisper、`mlx-whisper`、`whisper.cpp` 以及兼容 OpenAI 的 API。
+- **稳定翻译**：JSON 约束、自动重试、可调节批量大小。
+- **字幕排版友好**：智能断句、时间轴微调、中英字符自动补空格。
+- **断点续跑**：缓存目录 `.transub/` 可保存音频、分段和翻译进度，避免重复计算。
 
 ## 快速开始
 
-### 环境依赖
+### 准备工作
 
-- Python 3.10+
-- 安装 `ffmpeg`
-- 具备翻译模型 API（默认 OpenRouter / DeepSeek）
-- 视 Whisper 后端选择安装 `mlx-whisper`、`openai-whisper` 或 `whisper.cpp`
+- 安装 **Python 3.10+**。
+- 确保系统路径中可运行 **`ffmpeg`**。
+- 预先准备 **LLM API 凭证**（默认配置对接 OpenAI 兼容接口，可在 `transub.conf` 中指定 `api_key_env` 环境变量）。
+- 预留足够磁盘空间，用于 `./.transub/` 下的临时音频与转写缓存。
 
-### 安装
+以下步骤针对不同平台提供推荐的 Whisper 后端与安装指引。
 
-```bash
-git clone https://github.com/PiktCai/transub.git
-cd transub
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
+### Windows（PowerShell，本地 Whisper）
 
-### 首次运行
+1. **安装依赖**
+   - [Python 3.10+](https://www.python.org/downloads/windows/)
+   - `ffmpeg`：`winget install Gyan.FFmpeg` 或 `choco install ffmpeg`
+2. **克隆仓库并创建虚拟环境**
+   ```powershell
+   git clone https://github.com/PiktCai/transub.git
+   cd transub
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -e .
+   pip install openai-whisper
+   ```
+   如需使用 GPU，请额外安装匹配的 PyTorch CUDA 轮子。
+3. **初始化配置**
+   ```powershell
+   transub init
+   ```
+   在 `[whisper]` 区块保持 `backend = "local"`，并选取 `small`、`medium` 等模型。
+4. **执行流水线**
+   ```powershell
+   transub run .\video.mp4 --work-dir .\.transub
+   ```
+   生成字幕输出到 `.\output\`，默认包含 `video.zh_cn.srt` 与 `video.en.srt`。
 
-```bash
-transub init           # 交互式生成 transub.conf
-transub run video.mp4  # 自动生成中/英文字幕
-```
+### macOS（Apple Silicon，mlx-whisper）
 
-生成的文件默认位于 `./output/`，包括：
+1. **安装依赖**
+   - Python 3.10+（可通过 `brew install python@3.11`）
+   - `ffmpeg`：`brew install ffmpeg`
+2. **克隆并创建虚拟环境**
+   ```bash
+   git clone https://github.com/PiktCai/transub.git
+   cd transub
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -e .
+   pip install mlx-whisper
+   ```
+   `mlx-whisper` 基于 MLX，可在 Apple Silicon GPU/NPU 上高效运行。
+3. **初始化配置**
+   ```bash
+   transub init
+   ```
+   将 `backend` 设置为 `"mlx"`，选择模型（如 `mlx-community/whisper-small.en-mlx`），必要时填写 `mlx_model_dir`。
+4. **执行流水线**
+   ```bash
+   transub run ./video.mp4 --work-dir ./.transub
+   ```
+   字幕文件默认保存在 `./output/`，格式为 `.srt` 或 `.vtt`。
 
-- `video.zh_cn.srt`：中文翻译字幕，自动处理中英文间距。
-- `video.en.srt`：英文转写字幕（可配置关闭）。
+### Linux（Bash，本地 Whisper）
 
-## 配置说明
+1. **安装依赖**
+   ```bash
+   sudo apt update && sudo apt install ffmpeg python3 python3-venv  # Debian/Ubuntu
+   # Arch 用户：sudo pacman -S ffmpeg python python-virtualenv
+   ```
+2. **克隆仓库并创建虚拟环境**
+   ```bash
+   git clone https://github.com/PiktCai/transub.git
+   cd transub
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -e .
+   pip install openai-whisper
+   ```
+   如需 GPU 加速，可参考 [PyTorch 官网](https://pytorch.org/) 安装适配的 `torch`、`torchvision`、`torchaudio`。
+3. **初始化配置**
+   ```bash
+   transub init
+   ```
+   向导中保持 `backend = "local"`，选择符合硬件条件的 Whisper 模型。
+4. **执行流水线**
+   ```bash
+   transub run ./video.mp4 --work-dir ./.transub
+   ```
+   生成字幕位于 `./output/` 目录。
 
-`transub.conf` 使用 TOML 格式：
+> 提示：若更换视频或 Whisper 配置，为避免旧缓存干扰，可在重新运行前清理 `.transub/` 目录。
 
-- `[whisper]`：选择后端（`local` / `mlx` / `cpp` / `api`）、模型、设备、额外参数。
+## 配置总览
+
+运行时配置存放于 `transub.conf`（TOML），主要包含：
+
+- `[whisper]`：后端类型、模型、设备及额外参数。
 - `[llm]`：翻译模型、批大小、温度、重试策略等。
-- `[pipeline]`：输出格式、最大/最小行长、时间轴修正、标点剔除、CJK 空格处理等。
+- `[pipeline]`：输出格式、行长限制、时间轴修正、标点与空格控制。
 
 示例：
 
@@ -62,18 +150,18 @@ normalize_cjk_spacing = true
 timing_offset_seconds = 0.05
 ```
 
-执行 `transub configure` 可在终端中交互式修改配置项。
+执行 `transub configure` 可进入交互式编辑，或直接修改文件。配置文件属于用户环境，不建议提交至版本库。
 
-## 常用命令
+## 常用命令速查
 
 ```bash
 transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub
 transub show_config
-transub init --config ./transub.conf     # 重新初始化
-transub configure                        # 配置编辑器
+transub init --config ./transub.conf   # 重新运行初始化向导
+transub configure                      # 编辑现有配置
 ```
 
-缓存目录 `.transub/` 存储音频、分段 JSON 以及翻译进度；流程成功后会自动清理，如需保留可在中断时选择“否”。
+缓存目录 `.transub/` 会保存音频、分段 JSON、翻译进度与流水线状态；如执行中断，重新运行即可继续。
 
 ## 开发者指南
 
@@ -84,9 +172,9 @@ pip install -e ".[dev]"
 python -m unittest
 ```
 
-- 核心模块位于 `transub/`，对应功能详见代码注释。
-- 修复/新增功能时请补充单元测试（参考 `transub/test_subtitles.py`）。
-- CLI 输出统一使用 Rich；日志通过 `transub.logger` 记录。
+- 核心代码位于 `transub/`（`cli.py`、`config.py`、`transcribe.py`、`translate.py`、`subtitles.py` 等）。
+- 新增功能请在相关目录旁添加 `test_*.py` 单元测试（如 `transub/test_subtitles.py`）。
+- 统一使用 Rich 控制台与 `transub.logger.setup_logging` 输出日志。
 
 ## 目录结构
 
@@ -103,5 +191,5 @@ transub/
 
 ## 许可协议
 
-本项目主要用于个人学习参考，目前不接受外部贡献；如需修改请自行 fork。  
-项目基于 [MIT License](LICENSE) 开源发布。
+项目主要用于个人学习与研究，目前不接受外部贡献；如需自定义请自行 fork。  
+Transub 基于 [MIT License](LICENSE) 开源发布。
