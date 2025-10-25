@@ -573,7 +573,7 @@ def configure(
             dirty = True
 
 
-BACK_TOKENS = {"back", "b", "上一步"}
+BACK_TOKENS = {"back", "b"}
 
 
 class BackAction(Exception):
@@ -590,7 +590,7 @@ class WizardStep:
 
 
 def _is_back(value: str) -> bool:
-    return value.strip().lower() in BACK_TOKENS or value.strip() == "上一步"
+    return value.strip().lower() in BACK_TOKENS
 
 
 

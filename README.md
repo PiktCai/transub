@@ -49,9 +49,10 @@ Intermediate state is cached so interrupted runs can resume without repeating ea
 
 Follow the guide for your platform to install dependencies and select the recommended Whisper backend.
 
-> Tip: Need only the raw transcription? Append `--transcribe-only` to `transub run` to skip translation.
-> Tip: English→Chinese was the original use case, so that’s what the bundled configs illustrate—but feel free to swap in any source/target pair.
-> Tip: During `transub init`, type `back` to revisit the previous question.
+> [!TIP]
+> - Need only the raw transcription? Append `--transcribe-only` to `transub run` to skip translation.
+> - English→Chinese was the original use case, so that's what the bundled configs illustrate—but feel free to swap in any source/target pair.
+> - During `transub init`, type `back` to revisit the previous question.
 
 ### Windows (PowerShell, Local Whisper)
 
@@ -133,7 +134,8 @@ Follow the guide for your platform to install dependencies and select the recomm
    ```
    Generated subtitles are saved under `./output/`.
 
-> Tip: Clear the `.transub/` work directory between experiments if you switch videos or Whisper configurations to avoid stale caches.
+> [!TIP]
+> Clear the `.transub/` work directory between experiments if you switch videos or Whisper configurations to avoid stale caches.
 
 ## Configuration Overview
 
