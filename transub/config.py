@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from textwrap import dedent
 
-import tomli
+try:  # Python 3.11+
+    import tomllib as tomli  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # pragma: no cover - fallback for <3.11
+    import tomli  # type: ignore[no-redef]
+
 import tomli_w
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
