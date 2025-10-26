@@ -77,22 +77,29 @@ Upgrade with:
 pip install --upgrade transub
 ```
 
-### 3. Install a Whisper Backend
+### 3. Install a Whisper Backend (Optional)
 
-`transub` supports multiple Whisper backends. You need to install at least one.
+`transub` supports multiple Whisper backends. Choose one based on your needs:
 
-- **For most users (local, CPU/GPU):**
-  ```bash
-  pip install openai-whisper
-  ```
+- **Cloud API (Recommended for quick start):**
+  - Uses OpenAI's Whisper API or compatible endpoints
+  - No local installation required
+  - Set `OPENAI_API_KEY` environment variable
+  - Configure with `backend = "api"` during setup
 
-- **For Apple Silicon (macOS):**
-  ```bash
-  pip install mlx-whisper
-  ```
-
-- **For `whisper.cpp`:**
-  Follow the [whisper.cpp installation instructions](https://github.com/ggerganov/whisper.cpp) to build the `main` executable and make it available on your `PATH`.
+- **Local backends (for offline use or custom models):**
+  - **For most users (local, CPU/GPU):**
+    ```bash
+    pip install openai-whisper
+    ```
+  
+  - **For Apple Silicon (macOS):**
+    ```bash
+    pip install mlx-whisper
+    ```
+  
+  - **For `whisper.cpp`:**
+    Follow the [whisper.cpp installation instructions](https://github.com/ggerganov/whisper.cpp) to build the `main` executable and make it available on your `PATH`.
 
 ### 4. Configure Transub
 
@@ -103,6 +110,8 @@ transub init
 ```
 
 The wizard will guide you through selecting the backend, model, and LLM provider for translation.
+
+**Note on API Keys:** If you use OpenAI for both transcription (Whisper API) and translation (GPT models), they share the same `OPENAI_API_KEY` by default. If you need separate keys for different services, you can customize `api_key_env` in the config file for each service.
 
 ### 5. Run the Pipeline
 

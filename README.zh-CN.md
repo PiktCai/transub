@@ -77,22 +77,29 @@ pip install transub
 pip install --upgrade transub
 ```
 
-### 3. 安装 Whisper 后端
+### 3. 安装 Whisper 后端（可选）
 
-`transub` 支持多种 Whisper 实现，至少选择一个即可。
+`transub` 支持多种 Whisper 实现，根据需要选择：
 
-- **常规使用（本地 CPU/GPU）**
-  ```bash
-  pip install openai-whisper
-  ```
+- **云端 API（推荐快速开始）：**
+  - 使用 OpenAI Whisper API 或兼容端点
+  - 无需本地安装任何依赖
+  - 设置 `OPENAI_API_KEY` 环境变量
+  - 配置时选择 `backend = "api"`
 
-- **Apple Silicon（macOS）**
-  ```bash
-  pip install mlx-whisper
-  ```
-
-- **`whisper.cpp`**
-  参考 [whisper.cpp 官方安装说明](https://github.com/ggerganov/whisper.cpp)，编译 `main` 可执行文件并加入 `PATH`。
+- **本地后端（离线使用或自定义模型）：**
+  - **常规使用（本地 CPU/GPU）**
+    ```bash
+    pip install openai-whisper
+    ```
+  
+  - **Apple Silicon（macOS）**
+    ```bash
+    pip install mlx-whisper
+    ```
+  
+  - **`whisper.cpp`**
+    参考 [whisper.cpp 官方安装说明](https://github.com/ggerganov/whisper.cpp)，编译 `main` 可执行文件并加入 `PATH`。
 
 ### 4. 初始化 Transub
 
@@ -103,6 +110,8 @@ transub init
 ```
 
 向导会引导你选择 Whisper 后端、模型以及翻译所需的 LLM 提供方。
+
+**API Key 说明：** 如果同时使用 OpenAI 的转录服务（Whisper API）和翻译服务（GPT 模型），默认共用同一个 `OPENAI_API_KEY` 环境变量。如需为不同服务使用不同的 API key，可在配置文件中分别自定义各服务的 `api_key_env` 字段。
 
 ### 5. 运行流水线
 
