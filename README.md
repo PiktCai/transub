@@ -85,13 +85,11 @@ pip install --upgrade transub
   ```bash
   pip install openai-whisper
   ```
-  *(Note: If you used `pipx`, you may need to run `pipx inject transub openai-whisper`)*
 
 - **For Apple Silicon (macOS):**
   ```bash
   pip install mlx-whisper
   ```
-  *(Note: If you used `pipx`, you may need to run `pipx inject transub mlx-whisper`)*
 
 - **For `whisper.cpp`:**
   Follow the [whisper.cpp installation instructions](https://github.com/ggerganov/whisper.cpp) to build the `main` executable and make it available on your `PATH`.

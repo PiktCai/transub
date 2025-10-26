@@ -85,13 +85,11 @@ pip install --upgrade transub
   ```bash
   pip install openai-whisper
   ```
-  *若通过 `pipx` 安装 `transub`，可执行 `pipx inject transub openai-whisper` 注入同一环境。*
 
 - **Apple Silicon（macOS）**
   ```bash
   pip install mlx-whisper
   ```
-  *`pipx` 用户可执行 `pipx inject transub mlx-whisper`。*
 
 - **`whisper.cpp`**
   参考 [whisper.cpp 官方安装说明](https://github.com/ggerganov/whisper.cpp)，编译 `main` 可执行文件并加入 `PATH`。
