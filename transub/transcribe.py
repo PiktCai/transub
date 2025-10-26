@@ -74,22 +74,23 @@ def check_dependencies(config: WhisperConfig) -> None:
         pass  # Package not found, try to find a CLI tool
 
     # If package import fails, look for a CLI tool
-    cli_map = {
-        "local": "whisper",
-        "mlx": "mlx-whisper",
-        "cpp": config.cpp_binary or "whisper-cpp",
+    cli_map: dict[str, list[str]] = {
+        "local": ["whisper"],
+        "mlx": ["mlx-whisper", "mlx_whisper"],
+        "cpp": [config.cpp_binary] if config.cpp_binary else ["whisper-cpp"],
     }
-    cli_name = cli_map.get(backend)
-    if not cli_name:
+    cli_candidates = cli_map.get(backend)
+    if not cli_candidates:
         return # Should not happen with validated config
 
-    exec_path = shutil.which(cli_name)
-    if exec_path:
-        config.execution_mode = "external"
-        config.cli_path = exec_path
-        if backend == "cpp":
-            config.cpp_binary = exec_path
-        return
+    for candidate in cli_candidates:
+        exec_path = shutil.which(candidate)
+        if exec_path:
+            config.execution_mode = "external"
+            config.cli_path = exec_path
+            if backend == "cpp":
+                config.cpp_binary = exec_path
+            return
 
     # If neither package nor CLI is found, raise an error
     if backend == "local":
@@ -100,7 +101,7 @@ def check_dependencies(config: WhisperConfig) -> None:
     if backend == "mlx":
         raise TranscriptionError(
             "For the 'mlx' backend, you must either install 'mlx-whisper' in the same "
-            "environment as transub, or have the 'mlx-whisper' command-line tool in your PATH."
+            "environment as transub, or have the 'mlx-whisper' (or 'mlx_whisper') command-line tool in your PATH."
         )
     if backend == "cpp":
         raise TranscriptionError(
