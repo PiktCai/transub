@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -51,6 +52,14 @@ class WhisperConfig(BaseModel):
 
     backend: str = Field(
         default="local", description="Which backend to use: local, api, cpp, or mlx"
+    )
+    execution_mode: str = Field(
+        default="internal",
+        description="Execution strategy: 'internal' (python import) or 'external' (cli subprocess)",
+    )
+    cli_path: str | None = Field(
+        default=None,
+        description="Path to the CLI executable for 'external' mode",
     )
     model: str = Field(default="base", description="Whisper model size")
     device: str | None = Field(
@@ -193,8 +202,8 @@ class PipelineConfig(BaseModel):
     keep_temp_audio: bool = Field(
         default=False, description="Keep intermediate extracted audio file"
     )
-    output_dir: str = Field(
-        default="./output",
+    output_dir: str | None = Field(
+        default=None,
         description="Directory for generated subtitle files",
     )
     save_source_subtitles: bool = Field(
@@ -325,7 +334,13 @@ class ConfigManager:
 
     @classmethod
     def default_path(cls) -> Path:
-        return Path.cwd() / CONFIG_FILENAME
+        # Environment variable overrides everything so packaged installs can
+        # point at a shared config location.
+        env_path = os.getenv("TRANSUB_CONFIG")
+        if env_path:
+            return Path(env_path).expanduser()
+
+        return Path.home() / ".transub" / CONFIG_FILENAME
 
 
 def load_or_create_default(path: Optional[Path] = None) -> TransubConfig:

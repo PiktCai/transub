@@ -4,10 +4,34 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transub"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI tool to transcribe and translate subtitles from videos"
-authors = [{ name = "Transub Authors" }]
+authors = [{ name = "PiktCai" }]
 requires-python = ">=3.10"
+readme = { file = "README.md", content-type = "text/markdown" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "subtitles",
+    "transcription",
+    "translation",
+    "whisper",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Utilities",
+]
 dependencies = [
     "typer>=0.9",
     "rich>=13.7",
@@ -22,9 +46,20 @@ dependencies = [
 [project.scripts]
 transub = "transub.cli:app"
 
+[project.urls]
+Homepage = "https://github.com/PiktCai/transub"
+Repository = "https://github.com/PiktCai/transub"
+Issues = "https://github.com/PiktCai/transub/issues"
+
 [tool.setuptools.packages.find]
 include = ["transub*"]
 exclude = ["output*"]
 
+[tool.setuptools.package-data]
+transub = ["transub-sample.conf"]
+
 [tool.typer]
 pretty_exceptions_show_locals = false
+
+[tool.setuptools.exclude-package-data]
+"*" = ["test_*.py", "*_test.py"]

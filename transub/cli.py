@@ -5,6 +5,7 @@ import shlex
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
+from importlib import metadata
 
 import typer
 from rich import box
@@ -24,7 +25,7 @@ from .state import (
     persist_translation_progress,
 )
 from .subtitles import SubtitleDocument
-from .transcribe import TranscriptionError, transcribe_audio
+from .transcribe import TranscriptionError, transcribe_audio, check_dependencies
 from .translate import LLMTranslationError, translate_subtitles
 
 THEME_COLOR = "#33c9b2"
@@ -63,6 +64,29 @@ WHISPER_MODEL_SUGGESTIONS: dict[str, list[str]] = {
 }
 
 
+def _get_version() -> str:
+    try:
+        return metadata.version("transub")
+    except metadata.PackageNotFoundError:  # pragma: no cover - dev installs
+        return "unknown"
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        help="Show Transub version and exit.",
+        is_eager=True,
+    ),
+) -> None:
+    if version:
+        console.print(f"Transub { _get_version() }")
+        raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        console.print(app.get_help())
 def _print_header(
     *,
     subtitle: str | None = None,
@@ -121,9 +145,9 @@ def run(
         None, "--config", "-c", help="Custom configuration file location"
     ),
     work_dir: Optional[Path] = typer.Option(
-        Path("./.transub"),
+        None,
         "--work-dir",
-        help="Temporary working directory for intermediate files",
+        help="Working directory for intermediate files (defaults to ~/.cache/transub).",
     ),
     transcribe_only: bool = typer.Option(
         False,
@@ -135,8 +159,9 @@ def run(
     """Run the end-to-end subtitle creation pipeline."""
 
     config = _load_config(config_path)
+    check_dependencies(config.whisper)
 
-    work_dir = (work_dir or Path("./.transub")).resolve()
+    work_dir = (work_dir or Path.home() / ".cache" / "transub").resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
 
     config_display = (config_path or ConfigManager.default_path()).resolve()
@@ -230,6 +255,12 @@ def run(
             if segments_path:
                 state.mark_transcription(segments_path, total_lines)
 
+        output_dir = (
+            Path(config.pipeline.output_dir)
+            if config.pipeline.output_dir is not None
+            else video.parent
+        )
+
         if transcribe_only:
             console.print(f"[{THEME_COLOR}]Transcribe-only mode: skipping translation.[/]")
             logger.info("Transcribe-only mode enabled; skipping translation stage.")
@@ -253,7 +284,7 @@ def run(
             source_suffix = _source_language_suffix(config.whisper.language)
             transcript_path = _write_document(
                 document=transcript_doc,
-                target_dir=Path(config.pipeline.output_dir),
+                target_dir=output_dir,
                 stem=video.stem,
                 suffix=source_suffix,
                 output_format=config.pipeline.output_format,
@@ -352,7 +383,7 @@ def run(
         output_suffix = _language_suffix(config.llm.target_language)
         output_path = _write_document(
             document=output_doc,
-            target_dir=Path(config.pipeline.output_dir),
+            target_dir=output_dir,
             stem=video.stem,
             suffix=output_suffix,
             output_format=config.pipeline.output_format,
@@ -380,7 +411,7 @@ def run(
             source_suffix = _source_language_suffix(config.whisper.language)
             source_path = _write_document(
                 document=source_output_doc,
-                target_dir=Path(config.pipeline.output_dir),
+                target_dir=output_dir,
                 stem=video.stem,
                 suffix=source_suffix,
                 output_format=config.pipeline.output_format,

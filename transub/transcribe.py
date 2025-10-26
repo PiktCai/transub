@@ -56,6 +56,59 @@ def _suppress_tqdm() -> Any:
             os.environ["TQDM_DISABLE"] = previous
 
 
+def check_dependencies(config: WhisperConfig) -> None:
+    """Check for required dependencies and determine execution mode."""
+    backend = config.backend
+    if backend == "api":
+        return  # No local dependencies to check
+
+    # Try to import the package first
+    try:
+        if backend == "local":
+            import whisper  # type: ignore
+        elif backend == "mlx":
+            import mlx_whisper  # type: ignore
+        config.execution_mode = "internal"
+        return
+    except ImportError:
+        pass  # Package not found, try to find a CLI tool
+
+    # If package import fails, look for a CLI tool
+    cli_map = {
+        "local": "whisper",
+        "mlx": "mlx-whisper",
+        "cpp": config.cpp_binary or "whisper-cpp",
+    }
+    cli_name = cli_map.get(backend)
+    if not cli_name:
+        return # Should not happen with validated config
+
+    exec_path = shutil.which(cli_name)
+    if exec_path:
+        config.execution_mode = "external"
+        config.cli_path = exec_path
+        if backend == "cpp":
+            config.cpp_binary = exec_path
+        return
+
+    # If neither package nor CLI is found, raise an error
+    if backend == "local":
+        raise TranscriptionError(
+            "For the 'local' backend, you must either install 'openai-whisper' in the same "
+            "environment as transub, or have the 'whisper' command-line tool in your PATH."
+        )
+    if backend == "mlx":
+        raise TranscriptionError(
+            "For the 'mlx' backend, you must either install 'mlx-whisper' in the same "
+            "environment as transub, or have the 'mlx-whisper' command-line tool in your PATH."
+        )
+    if backend == "cpp":
+        raise TranscriptionError(
+            f"whisper.cpp executable '{cli_name}' not found in PATH. "
+            "Please install whisper.cpp and ensure it is in your PATH."
+        )
+
+
 def transcribe_audio(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
     """Transcribe audio file using the configured backend."""
 
@@ -121,11 +174,21 @@ def _ensure_local_mlx_repo(repo_id: str) -> str:
 
 
 def _transcribe_local(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+    if config.execution_mode == "internal":
+        return _transcribe_local_internal(audio_path, config)
+    elif config.execution_mode == "external":
+        return _transcribe_local_external(audio_path, config)
+    else:
+        raise TranscriptionError(f"Unsupported execution mode for local backend: {config.execution_mode}")
+
+
+def _transcribe_local_internal(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
     try:
         import whisper  # type: ignore
-    except ImportError as exc:  # pragma: no cover - runtime dependency
+    except ImportError as exc:
         raise TranscriptionError(
-            "whisper Python package is required for local transcription."
+            "whisper Python package is required for internal transcription. "
+            "Install it via 'pip install openai-whisper' or ensure the 'whisper' CLI is in your PATH."
         ) from exc
 
     device = config.device or None
@@ -156,6 +219,56 @@ def _transcribe_local(audio_path: Path, config: WhisperConfig) -> SubtitleDocume
     segments = result.get("segments") or []
     if not segments:
         raise TranscriptionError("Whisper returned no segments")
+    return SubtitleDocument.from_whisper_segments(segments)
+
+
+def _transcribe_local_external(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+    if not config.cli_path:
+        raise TranscriptionError("cli_path not set for external local execution.")
+
+    output_dir = audio_path.parent
+    output_json = output_dir / f"{audio_path.stem}.json"
+
+    cmd = [
+        config.cli_path,
+        str(audio_path),
+        "--model",
+        config.model,
+        "--output_dir",
+        str(output_dir),
+        "--output_format",
+        "json",
+    ]
+    if config.language:
+        cmd.extend(["--language", config.language])
+    if config.device:
+        cmd.extend(["--device", config.device])
+
+    # Add extra arguments from extra_args
+    for key, value in (config.extra_args or {}).items():
+        cmd.append(f"--{key}")
+        if not isinstance(value, bool) or value:
+            cmd.append(str(value))
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise TranscriptionError(
+            f"Whisper CLI failed with exit code {result.returncode}: {result.stderr.strip()}"
+        )
+
+    if not output_json.exists():
+        raise TranscriptionError(
+            f"Whisper CLI did not produce JSON output at {output_json}"
+        )
+
+    with output_json.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    
+    output_json.unlink()
+
+    segments = payload.get("segments") or []
+    if not segments:
+        raise TranscriptionError("Whisper CLI output did not contain segments")
     return SubtitleDocument.from_whisper_segments(segments)
 
 
@@ -264,12 +377,21 @@ def _transcribe_cpp(audio_path: Path, config: WhisperConfig) -> SubtitleDocument
 
 
 def _transcribe_mlx(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+    if config.execution_mode == "internal":
+        return _transcribe_mlx_internal(audio_path, config)
+    elif config.execution_mode == "external":
+        return _transcribe_mlx_external(audio_path, config)
+    else:
+        raise TranscriptionError(f"Unsupported execution mode for mlx backend: {config.execution_mode}")
+
+
+def _transcribe_mlx_internal(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
     try:
         import mlx_whisper  # type: ignore
-    except ImportError as exc:  # pragma: no cover - runtime dependency
+    except ImportError as exc:
         raise TranscriptionError(
-            "mlx-whisper package is required when backend is set to 'mlx'. "
-            "Install it via 'pip install mlx-whisper'."
+            "mlx-whisper package is required for internal execution. "
+            "Install it or ensure the 'mlx_whisper' CLI tool is in your PATH for external execution."
         ) from exc
 
     kwargs: Dict[str, Any] = dict(config.mlx_extra_args or {})
@@ -341,6 +463,58 @@ def _transcribe_mlx(audio_path: Path, config: WhisperConfig) -> SubtitleDocument
     segments = result.get("segments") or []
     if not segments:
         raise TranscriptionError("mlx-whisper returned no segments.")
+    return SubtitleDocument.from_whisper_segments(segments)
+
+
+def _transcribe_mlx_external(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+    if not config.cli_path:
+        raise TranscriptionError("cli_path not set for external mlx execution.")
+
+    output_dir = Path(config.mlx_model_dir or '.')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_name = audio_path.stem
+    output_json = output_dir / f"{output_name}.json"
+
+    cmd = [
+        config.cli_path,
+        str(audio_path),
+        "--model",
+        config.model,
+        "--output-dir",
+        str(output_dir),
+        "--output-name",
+        output_name,
+        "--output-format",
+        "json",
+    ]
+    if config.language:
+        cmd.extend(["--language", config.language])
+
+    # Add extra arguments from mlx_extra_args
+    for key, value in (config.mlx_extra_args or {}).items():
+        cmd.append(f"--{key}")
+        if not isinstance(value, bool) or value:
+            cmd.append(str(value))
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise TranscriptionError(
+            f"mlx_whisper CLI failed with exit code {result.returncode}: {result.stderr.strip()}"
+        )
+
+    if not output_json.exists():
+        raise TranscriptionError(
+            f"mlx_whisper CLI did not produce JSON output at {output_json}"
+        )
+
+    with output_json.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    
+    output_json.unlink()
+
+    segments = payload.get("segments") or []
+    if not segments:
+        raise TranscriptionError("mlx_whisper CLI output did not contain segments")
     return SubtitleDocument.from_whisper_segments(segments)
 
 

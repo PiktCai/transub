@@ -1,6 +1,6 @@
 # Transub
 
-[中文说明](README.zh-CN.md)
+[中文说明](https://github.com/PiktCai/transub/blob/main/README.zh-CN.md)
 
 Turn any **video** into ready-to-share subtitles. Transub extracts audio with `ffmpeg`, runs Whisper to transcribe the speech track, and hands the text to an LLM so you get well-translated subtitles without leaving the terminal.
 
@@ -8,11 +8,12 @@ Turn any **video** into ready-to-share subtitles. Transub extracts audio with `f
 
 - [Overview](#overview)
 - [Key Features](#key-features)
-- [Quick Start](#quick-start)
-  - [Before You Begin](#before-you-begin)
-  - [Windows (PowerShell, Local Whisper)](#windows-powershell-local-whisper)
-  - [macOS (Apple Silicon, mlx-whisper)](#macos-apple-silicon-mlx-whisper)
-  - [Linux (Bash, Local Whisper)](#linux-bash-local-whisper)
+- [Installation](#installation)
+  - [1. Prerequisites](#1-prerequisites)
+  - [2. Install Transub](#2-install-transub)
+  - [3. Install a Whisper Backend](#3-install-a-whisper-backend)
+  - [4. Configure Transub](#4-configure-transub)
+  - [5. Run the Pipeline](#5-run-the-pipeline)
 - [Configuration Overview](#configuration-overview)
 - [CLI Cheatsheet](#cli-cheatsheet)
 - [Development](#development)
@@ -36,105 +37,82 @@ Intermediate state is cached so interrupted runs can resume without repeating ea
 - **Multiple transcription backends** — choose local Whisper, `mlx-whisper`, `whisper.cpp`, or OpenAI-compatible APIs.
 - **Reliable translations** — JSON-constrained prompts, retry logic, and configurable batch sizes.
 - **Subtitle polishing** — punctuation-aware line splitting, timing offsets, and optional spacing tweaks when different scripts appear in the same line.
-- **Stateful execution** — cached progress in `.transub/` avoids rework across runs.
+- **Stateful execution** — cached progress in the work directory (defaults to `~/.cache/transub`) avoids rework across runs.
 
-## Quick Start
+## Installation
 
-### Before You Begin
+### 1. Prerequisites
 
-- **Python 3.10+** installed on your system.
-- **ffmpeg** available on `PATH`.
-- **LLM API access** (default config expects an OpenAI-compatible endpoint; set the `api_key_env` variable in `transub.conf` to match your environment).
-- Enough disk space for temporary audio and transcription artifacts under `./.transub/`.
+- **Python 3.10+**
+- **ffmpeg**: Must be installed and available in your system's `PATH`.
+  - **Windows:** `winget install Gyan.FFmpeg` or `choco install ffmpeg`
+  - **macOS:** `brew install ffmpeg`
+  - **Linux:** `sudo apt update && sudo apt install ffmpeg` (Debian/Ubuntu) or `sudo pacman -S ffmpeg` (Arch)
 
-Follow the guide for your platform to install dependencies and select the recommended Whisper backend.
+### 2. Install Transub
 
-> [!TIP]
-> - Need only the raw transcription? Append `--transcribe-only` to `transub run` to skip translation.
-> - English→Chinese was the original use case, so that's what the bundled configs illustrate—but feel free to swap in any source/target pair.
+**Option A: Using `pipx` (Recommended)**
 
-### Windows (PowerShell, Local Whisper)
+`pipx` installs Python CLI tools in an isolated environment, which is the cleanest way to put `transub` on your `PATH`.
 
-1. **Install prerequisites**
-   - [Python 3.10+](https://www.python.org/downloads/windows/)
-   - `ffmpeg`: `winget install Gyan.FFmpeg` or `choco install ffmpeg`
-2. **Clone and create a virtual environment**
-   ```powershell
-   git clone https://github.com/PiktCai/transub.git
-   cd transub
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   pip install -e .
-   pip install openai-whisper
-   ```
-   Install a CUDA-enabled PyTorch wheel if GPU acceleration is desired.
-3. **Configure Transub**
-   ```powershell
-   transub init
-   ```
-   Keep `backend = "local"` in `[whisper]` and select a model such as `small` or `medium`.
-4. **Run the pipeline**
-   ```powershell
-   transub run .\video.mp4 --work-dir .\.transub
-   ```
-   Subtitles are written to `.\output\` with language-specific suffixes (for example, `video.en.srt` or `video.ja.srt`).
+```bash
+pipx install transub
+```
 
-### macOS (Apple Silicon, mlx-whisper)
+To update later, run:
 
-1. **Install prerequisites**
-   - Python 3.10+ (`brew install python@3.11` if needed)
-   - `ffmpeg`: `brew install ffmpeg`
-2. **Clone and set up the environment**
-   ```bash
-   git clone https://github.com/PiktCai/transub.git
-   cd transub
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -e .
-   pip install mlx-whisper
-   ```
-   `mlx-whisper` runs Whisper efficiently on Apple Silicon GPUs/NPUs.
-3. **Configure Transub**
-   ```bash
-   transub init
-   ```
-   Set `backend = "mlx"` in `[whisper]`; choose a model like `mlx-community/whisper-small.en-mlx` and optionally supply `mlx_model_dir` for local weights.
-4. **Run the pipeline**
-   ```bash
-   transub run ./video.mp4 --work-dir ./.transub
-   ```
-   Subtitles appear in `./output/` as `.srt` or `.vtt`, using suffixes that match your configured target language.
+```bash
+pipx upgrade transub
+```
 
-### Linux (Bash, Local Whisper)
+**Option B: Using `pip`**
 
-1. **Install prerequisites**
-   ```bash
-   sudo apt update && sudo apt install ffmpeg python3 python3-venv  # Debian/Ubuntu
-   # Arch: sudo pacman -S ffmpeg python python-virtualenv
-   ```
-2. **Clone and create a virtual environment**
-   ```bash
-   git clone https://github.com/PiktCai/transub.git
-   cd transub
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -e .
-   pip install openai-whisper
-   ```
-   Install an appropriate PyTorch wheel (`pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118`) if your GPU should accelerate Whisper.
-3. **Configure Transub**
-   ```bash
-   transub init
-   ```
-   Use the wizard with `backend = "local"` and pick a Whisper model that fits your hardware.
-4. **Run the pipeline**
-   ```bash
-   transub run ./video.mp4 --work-dir ./.transub
-   ```
-   Generated subtitles are saved under `./output/`.
+```bash
+pip install transub
+```
 
-> [!TIP]
-> Clear the `.transub/` work directory between experiments if you switch videos or Whisper configurations to avoid stale caches.
+Upgrade with:
+
+```bash
+pip install --upgrade transub
+```
+
+### 3. Install a Whisper Backend
+
+`transub` supports multiple Whisper backends. You need to install at least one.
+
+- **For most users (local, CPU/GPU):**
+  ```bash
+  pip install openai-whisper
+  ```
+  *(Note: If you used `pipx`, you may need to run `pipx inject transub openai-whisper`)*
+
+- **For Apple Silicon (macOS):**
+  ```bash
+  pip install mlx-whisper
+  ```
+  *(Note: If you used `pipx`, you may need to run `pipx inject transub mlx-whisper`)*
+
+- **For `whisper.cpp`:**
+  Follow the [whisper.cpp installation instructions](https://github.com/ggerganov/whisper.cpp) to build the `main` executable and make it available on your `PATH`.
+
+### 4. Configure Transub
+
+Run the interactive setup wizard to create your configuration file.
+
+```bash
+transub init
+```
+
+The wizard will guide you through selecting the backend, model, and LLM provider for translation.
+
+### 5. Run the Pipeline
+
+```bash
+transub run /path/to/your/video.mp4
+```
+
+Subtitles are written alongside the source video unless you set `pipeline.output_dir` in your config. Override the cache location with `--work-dir` when you need an alternate workspace.
 
 ## Configuration Overview
 
@@ -160,24 +138,49 @@ Run `transub configure` for an interactive editor, or update the file manually. 
 ## CLI Cheatsheet
 
 ```bash
-transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub
+transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub  # override work dir (defaults to ~/.cache/transub)
 transub show_config
 transub init --config ./transub.conf   # rerun the setup wizard
 transub configure                      # edit config (0 saves, Q discards)
 transub run demo.mp4 --transcribe-only # export raw transcription only
 transub run demo.mp4 -T              # short flag for transcribe-only
+transub --version                    # print the installed version
 ```
 
-Cache directory `.transub/` stores audio, transcription segments, translation progress, and pipeline state. If a run is interrupted, re-running the same command resumes where it left off.
+The work directory (defaults to `~/.cache/transub`) stores audio, transcription segments, translation progress, and pipeline state. If a run is interrupted, re-running the same command resumes where it left off. Use `--work-dir` to point at a custom cache location when needed.
 
 ## Development
 
+If you want to contribute to `transub`, you can set up a development environment.
+
+### Installation from Source
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/PiktCai/transub.git
+    cd transub
+    ```
+2.  **Create and activate a virtual environment:**
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    ```
+3.  **Install in editable mode with development dependencies:**
+    ```bash
+    pip install -e ".[dev]"
+    ```
+4.  **Install a Whisper backend for testing:**
+    ```bash
+    pip install openai-whisper
+    ```
+
+### Running Tests
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
 python -m unittest
 ```
+
+### Code Structure
 
 - Source lives in `transub/` (`cli.py`, `config.py`, `transcribe.py`, `translate.py`, `subtitles.py`, etc.).
 - Add tests beside related modules (e.g., `transub/test_subtitles.py`).

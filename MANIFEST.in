@@ -1,0 +1,10 @@
+include README.md
+include README.zh-CN.md
+include LICENSE
+include transub/transub-sample.conf
+
+# Exclude user config and test files from distribution
+global-exclude transub.conf
+global-exclude test_*.py *_test.py
+global-exclude __pycache__
+global-exclude *.pyc *.pyo
