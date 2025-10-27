@@ -966,11 +966,12 @@ def _wizard_step_pipeline_output(config: TransubConfig) -> None:
         ["wav", "mp3", "flac", "m4a", "ogg"],
         config.pipeline.audio_format,
     )
-    config.pipeline.output_dir = _wizard_ask_text(
-        "Output directory",
-        default=config.pipeline.output_dir,
-        allow_blank=False,
+    output_dir_input = _wizard_ask_text(
+        "Output directory (leave blank to use video file directory)",
+        default=config.pipeline.output_dir or "",
+        allow_blank=True,
     )
+    config.pipeline.output_dir = output_dir_input if output_dir_input else None
     config.pipeline.keep_temp_audio = _wizard_ask_bool(
         "Keep extracted audio file?",
         config.pipeline.keep_temp_audio,
@@ -1183,15 +1184,8 @@ def _config_summary_table(config: TransubConfig, path: Path) -> Table:
         (
             "pipeline",
             (
-                f"format={pipeline.output_format} | audio={pipeline.audio_format} | dir={pipeline.output_dir} | "
+                f"format={pipeline.output_format} | audio={pipeline.audio_format} | dir={pipeline.output_dir or '(video dir)'} | "
                 f"keep_audio={_fmt_bool(pipeline.keep_temp_audio)} | save_en={_fmt_bool(pipeline.save_source_subtitles)}"
-            ),
-        ),
-        (
-            "limits",
-            (
-                f"max_line={pipeline.max_chars_per_line} | min_line={pipeline.min_chars_per_line} | "
-                f"translated_max={pipeline.translation_max_chars_per_line} | translated_min={pipeline.translation_min_chars_per_line}"
             ),
         ),
     ]
@@ -1535,7 +1529,7 @@ def _configure_pipeline(config: TransubConfig) -> None:
         console.clear()
         summary_lines = [
             f"Format: {pipeline.output_format} | Audio: {pipeline.audio_format}",
-            f"Output dir: {pipeline.output_dir}",
+            f"Output dir: {pipeline.output_dir or '(video file directory)'}",
             f"Keep temp audio: {_fmt_bool(pipeline.keep_temp_audio)} | Save source subtitles: {_fmt_bool(pipeline.save_source_subtitles)}",
             f"Source display width: {pipeline.max_display_width} (min {pipeline.min_display_width})",
             f"Translation display width: {pipeline.translation_max_display_width} (min {pipeline.translation_min_display_width})",
@@ -1594,11 +1588,12 @@ def _configure_pipeline(config: TransubConfig) -> None:
                 default=pipeline.audio_format,
             )
         elif key == "dir":
-            pipeline.output_dir = Prompt.ask(
-                "Output directory",
-                default=pipeline.output_dir,
+            dir_input = Prompt.ask(
+                "Output directory (blank = video file directory)",
+                default=pipeline.output_dir or "",
                 show_choices=False,
             )
+            pipeline.output_dir = dir_input if dir_input else None
         elif key == "keep":
             pipeline.keep_temp_audio = Confirm.ask(
                 "Keep intermediate audio file?",
