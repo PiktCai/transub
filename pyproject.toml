@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transub"
-version = "0.1.2"
+version = "0.2.0"
 description = "CLI tool to transcribe and translate subtitles from videos"
 authors = [{ name = "PiktCai" }]
 requires-python = ">=3.10"

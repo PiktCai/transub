@@ -104,8 +104,9 @@ def check_dependencies(config: WhisperConfig) -> None:
             "environment as transub, or have the 'mlx-whisper' (or 'mlx_whisper') command-line tool in your PATH."
         )
     if backend == "cpp":
+        binary = config.cpp_binary or "whisper-cpp"
         raise TranscriptionError(
-            f"whisper.cpp executable '{cli_name}' not found in PATH. "
+            f"whisper.cpp executable '{binary}' not found in PATH. "
             "Please install whisper.cpp and ensure it is in your PATH."
         )
 
@@ -198,6 +199,8 @@ def _transcribe_local_internal(audio_path: Path, config: WhisperConfig) -> Subti
     transcribe_kwargs: Dict[str, Any] = dict(config.extra_args)
     if config.language:
         transcribe_kwargs.setdefault("language", config.language)
+    if config.word_timestamps:
+        transcribe_kwargs.setdefault("word_timestamps", True)
     if config.tune_segmentation:
         if config.temperature is not None:
             transcribe_kwargs.setdefault("temperature", config.temperature)
@@ -244,6 +247,8 @@ def _transcribe_local_external(audio_path: Path, config: WhisperConfig) -> Subti
         cmd.extend(["--language", config.language])
     if config.device:
         cmd.extend(["--device", config.device])
+    if config.word_timestamps:
+        cmd.extend(["--word_timestamps", "True"])
 
     # Add extra arguments from extra_args
     for key, value in (config.extra_args or {}).items():
@@ -288,6 +293,9 @@ def _transcribe_api(audio_path: Path, config: WhisperConfig) -> SubtitleDocument
     }
     if config.language:
         data.setdefault("language", config.language)
+    if config.word_timestamps:
+        # OpenAI API uses timestamp_granularities parameter
+        data.setdefault("timestamp_granularities", ["word", "segment"])
     if config.tune_segmentation:
         if config.temperature is not None:
             data.setdefault("temperature", config.temperature)
@@ -398,6 +406,8 @@ def _transcribe_mlx_internal(audio_path: Path, config: WhisperConfig) -> Subtitl
     kwargs: Dict[str, Any] = dict(config.mlx_extra_args or {})
     if config.language:
         kwargs.setdefault("language", config.language)
+    if config.word_timestamps:
+        kwargs.setdefault("word_timestamps", True)
     if config.tune_segmentation:
         if config.no_speech_threshold is not None:
             kwargs.setdefault("no_speech_threshold", config.no_speech_threshold)
@@ -490,6 +500,8 @@ def _transcribe_mlx_external(audio_path: Path, config: WhisperConfig) -> Subtitl
     ]
     if config.language:
         cmd.extend(["--language", config.language])
+    if config.word_timestamps:
+        cmd.extend(["--word-timestamps", "True"])
 
     # Add extra arguments from mlx_extra_args
     for key, value in (config.mlx_extra_args or {}).items():

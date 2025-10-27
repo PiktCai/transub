@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Iterable, List
+from typing import Any, Dict, Iterable, List
 import re
 
 _SOFT_PUNCT_PATTERN = re.compile(r"[，,；;、]")
@@ -14,9 +14,242 @@ _CHINESE_CONNECTIVE_SUFFIXES = ("但是", "不过", "然而", "可是", "所以"
 _CHINESE_CONNECTIVE_CHARS = {"和", "或", "但", "而", "且", "并", "却", "又"}
 _ENGLISH_CONNECTIVES = {"and", "or", "but", "so", "yet", "though"}
 _TRAILING_PUNCTUATION = "。！？?!?,.;；:：…，、"
-_CLOSING_WRAPPERS = "\"'”’）)】》〉］]」』＞｝】"
+_CLOSING_WRAPPERS = '"' + "'" + "'" + "\u201c\u201d\uff09)\u3011\u300b\u3009\uff3d]\u300d\u300f\uff1e\uff5d\u3011"
 _CJK_LATIN_LEFT_PATTERN = re.compile(r"([\u4e00-\u9fff])([A-Za-z0-9])")
 _CJK_LATIN_RIGHT_PATTERN = re.compile(r"([A-Za-z0-9])([\u4e00-\u9fff])")
+
+# Sentence-ending punctuation (highest priority for splits)
+_SENTENCE_ENDERS = {'.', '!', '?', '。', '！', '？', '…'}
+
+# Phrase-ending punctuation (medium priority for splits)
+_PHRASE_ENDERS = {',', ';', ':', '，', '；', '：', '、'}
+
+
+def _estimate_display_width(text: str) -> float:
+    """Estimate the display width of text for subtitle rendering.
+    
+    Industry standard: ~42 units for English, but CJK characters are wider.
+    This function estimates visual width to ensure single-line display.
+    
+    Args:
+        text: The subtitle text to measure
+    
+    Returns:
+        Estimated display width (1.0 = one standard Latin character)
+    """
+    width = 0.0
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff':  # CJK Unified Ideographs
+            width += 2.0  # CJK characters are roughly twice as wide
+        elif '\u3000' <= char <= '\u303f':  # CJK symbols and punctuation
+            width += 2.0
+        elif '\uff00' <= char <= '\uffef':  # Fullwidth forms
+            width += 2.0
+        elif char.isupper():
+            width += 1.2  # Uppercase letters are slightly wider
+        elif char in 'mwMW':
+            width += 1.3  # Wide Latin letters
+        elif char in 'il1!|':
+            width += 0.5  # Narrow characters
+        else:
+            width += 1.0  # Standard character
+    return width
+
+
+def _find_sentence_boundary(words: List[Dict[str, Any]], start_idx: int, end_idx: int) -> int | None:
+    """Find the best sentence boundary within the given range.
+    
+    Priority:
+    1. Sentence-ending punctuation (. ! ? 。！？)
+    2. Phrase-ending punctuation (, ; : ，；：)
+    
+    Args:
+        words: List of word dicts
+        start_idx: Start of range to search
+        end_idx: End of range to search
+    
+    Returns:
+        Index of the best boundary, or None if no good boundary found
+    """
+    best_sentence = None
+    best_phrase = None
+    
+    for i in range(start_idx, end_idx + 1):
+        word = words[i].get("word", "").strip()
+        if not word:
+            continue
+        
+        # Check if word ends with sentence-ending punctuation
+        if word[-1] in _SENTENCE_ENDERS:
+            best_sentence = i  # Keep looking for the last one
+        # Check if word ends with phrase-ending punctuation
+        elif word[-1] in _PHRASE_ENDERS and best_sentence is None:
+            best_phrase = i
+    
+    # Prefer sentence boundary over phrase boundary
+    return best_sentence if best_sentence is not None else best_phrase
+
+
+def _split_with_word_timing(
+    words: List[Dict[str, Any]],
+    max_width: float,
+    min_width: float,
+    pause_threshold: float = 0.3,
+    silence_threshold: float = 2.0,
+    remove_silence: bool = True,
+    prefer_sentence_boundaries: bool = True,
+) -> List[tuple[str, float, float]]:
+    """Split using word-level timestamps with professional semantic awareness.
+    
+    Uses display width estimation, semantic boundaries (sentences/phrases), and
+    natural pauses to create professional single-line subtitles.
+    
+    Args:
+        words: List of word dicts with 'word', 'start', 'end' keys
+        max_width: Maximum display width (42.0 = industry standard)
+        min_width: Minimum display width to avoid too-short lines
+        pause_threshold: Minimum gap (seconds) to consider as a natural pause
+        silence_threshold: Minimum gap (seconds) to consider as silence
+        remove_silence: Whether to skip segments with only silence
+        prefer_sentence_boundaries: Prefer splitting at sentence/phrase boundaries
+    
+    Returns:
+        List of (text, start_time, end_time) tuples.
+    """
+    if not words:
+        return []
+    
+    # Filter out empty words
+    words = [w for w in words if w.get("word", "").strip()]
+    if not words:
+        return []
+    
+    chunks: List[tuple[str, float, float]] = []
+    chunk_start_idx = 0
+    
+    while chunk_start_idx < len(words):
+        current_text = ""
+        current_width = 0.0
+        current_end_idx = chunk_start_idx
+        
+        # Candidates for split points with priority scores
+        split_candidates: List[tuple[int, float, str]] = []  # (idx, priority, reason)
+        
+        for i in range(chunk_start_idx, len(words)):
+            word = words[i].get("word", "").strip()
+            
+            # Check for silence gap (always respect these)
+            if remove_silence and i > chunk_start_idx:
+                prev_end = words[i - 1].get("end", 0.0)
+                curr_start = words[i].get("start", 0.0)
+                gap = curr_start - prev_end
+                
+                if gap >= silence_threshold:
+                    # Hard stop at silence
+                    current_end_idx = i - 1
+                    break
+            
+            # Try adding this word
+            if current_text:
+                test_text = current_text + " " + word
+            else:
+                test_text = word
+            
+            test_width = _estimate_display_width(test_text)
+            
+            if test_width > max_width:
+                # Would exceed max width - need to split
+                if current_end_idx > chunk_start_idx:
+                    # We have accumulated words, evaluate candidates
+                    break
+                else:
+                    # First word itself exceeds max, include it anyway (rare)
+                    current_text = test_text
+                    current_width = test_width
+                    current_end_idx = i
+                    break
+            
+            # This word fits
+            current_text = test_text
+            current_width = test_width
+            current_end_idx = i
+            
+            # Evaluate this position as a potential split point
+            if current_width >= min_width:
+                priority = 0.0
+                reason = "neutral"
+                
+                # 1. Sentence boundary (highest priority)
+                if word[-1] in _SENTENCE_ENDERS:
+                    priority = 100.0
+                    reason = "sentence_end"
+                
+                # 2. Phrase boundary (high priority)
+                elif word[-1] in _PHRASE_ENDERS:
+                    priority = 50.0
+                    reason = "phrase_end"
+                
+                # 3. Natural pause (medium priority)
+                if i < len(words) - 1:
+                    word_end = words[i].get("end", 0.0)
+                    next_start = words[i + 1].get("start", 0.0)
+                    gap = next_start - word_end
+                    
+                    if gap >= pause_threshold:
+                        priority += 30.0  # Boost priority for natural pauses
+                        if reason == "neutral":
+                            reason = "pause"
+                
+                # 4. Optimal width (prefer ~80-90% of max width)
+                width_ratio = current_width / max_width
+                if 0.8 <= width_ratio <= 0.95:
+                    priority += 20.0  # Bonus for good length
+                elif width_ratio > 0.95:
+                    priority += 40.0  # Strong preference near max to use space efficiently
+                
+                if priority > 0 or i == len(words) - 1:
+                    split_candidates.append((i, priority, reason))
+        
+        # Select the best split point
+        best_split_idx = current_end_idx
+        
+        if split_candidates and prefer_sentence_boundaries:
+            # Sort by priority (highest first)
+            split_candidates.sort(key=lambda x: x[1], reverse=True)
+            best_split_idx = split_candidates[0][0]
+        
+        # Build the chunk
+        chunk_words = words[chunk_start_idx : best_split_idx + 1]
+        if chunk_words:
+            chunk_text = " ".join([w.get("word", "").strip() for w in chunk_words]).strip()
+            if chunk_text:
+                chunk_start_time = chunk_words[0].get("start", 0.0)
+                chunk_end_time = chunk_words[-1].get("end", 0.0)
+                chunks.append((chunk_text, chunk_start_time, chunk_end_time))
+        
+        # Move to next chunk
+        chunk_start_idx = best_split_idx + 1
+    
+    # Post-processing: merge very short last chunk if reasonable
+    if len(chunks) >= 2:
+        last_width = _estimate_display_width(chunks[-1][0])
+        if last_width < min_width:
+            prev_end = chunks[-2][2]
+            curr_start = chunks[-1][1]
+            gap = curr_start - prev_end
+            
+            # Only merge if not separated by silence and combined width is acceptable
+            if gap < silence_threshold:
+                prev_text, prev_start, _ = chunks[-2]
+                last_text, _, last_end = chunks[-1]
+                merged_text = f"{prev_text} {last_text}".strip()
+                merged_width = _estimate_display_width(merged_text)
+                
+                if merged_width <= max_width:
+                    chunks[-2] = (merged_text, prev_start, last_end)
+                    chunks.pop()
+    
+    return chunks
 
 
 def _split_text_for_limits(text: str, max_chars: int, min_chars: int) -> List[str]:
@@ -149,6 +382,7 @@ class SubtitleLine:
     start: float  # seconds
     end: float  # seconds
     text: str
+    words: List[Dict[str, Any]] | None = None  # word-level timestamps
 
     def to_srt_block(self) -> str:
         start_ts = format_timestamp(self.start)
@@ -196,19 +430,23 @@ class SubtitleDocument:
             text = (segment.get("text") or "").strip()
             start = float(segment.get("start"))
             end = float(segment.get("end"))
-            lines.append(SubtitleLine(index=idx, start=start, end=end, text=text))
+            words = segment.get("words")  # Preserve word-level timestamps if available
+            lines.append(SubtitleLine(index=idx, start=start, end=end, text=text, words=words))
         return cls(lines=lines)
 
     def to_serializable(self) -> List[dict]:
-        return [
-            {
+        result = []
+        for line in self.lines:
+            data = {
                 "index": line.index,
                 "start": line.start,
                 "end": line.end,
                 "text": line.text,
             }
-            for line in self.lines
-        ]
+            if line.words:
+                data["words"] = line.words
+            result.append(data)
+        return result
 
     @classmethod
     def from_serialized(cls, data: Iterable[dict]) -> "SubtitleDocument":
@@ -220,6 +458,7 @@ class SubtitleDocument:
                     start=float(item.get("start", 0.0)),
                     end=float(item.get("end", 0.0)),
                     text=str(item.get("text", "")).strip(),
+                    words=item.get("words"),  # Preserve word-level data
                 )
             )
         return cls(lines=lines)
@@ -249,25 +488,75 @@ class SubtitleDocument:
             lines.append(SubtitleLine(index=index, start=start, end=end, text=text))
         return cls(lines=lines)
 
-    def refine(self, max_chars: int = 60, min_chars: int = 25) -> "SubtitleDocument":
+    def refine(
+        self,
+        max_width: float = 42.0,
+        min_width: float = 20.0,
+        pause_threshold: float = 0.3,
+        silence_threshold: float = 2.0,
+        remove_silence: bool = True,
+        prefer_sentence_boundaries: bool = True,
+    ) -> "SubtitleDocument":
+        """Refine subtitle lines with professional quality.
+        
+        Args:
+            max_width: Maximum display width (42.0 = industry standard for English)
+            min_width: Minimum display width (20.0 avoids very short lines)
+            pause_threshold: Minimum gap for natural pauses (default 0.3s)
+            silence_threshold: Minimum gap to consider as silence (default 2.0s)
+            remove_silence: Whether to skip silence segments (default True)
+            prefer_sentence_boundaries: Prefer splitting at sentence/phrase boundaries (default True)
+        
+        Returns:
+            Refined subtitle document with intelligent splitting
+        """
+        
         if not self.lines:
             return SubtitleDocument(lines=[])
 
         split_lines: List[SubtitleLine] = []
         for line in self.lines:
-            chunks = _split_text_for_limits(line.text, max_chars, min_chars)
-            timings = _allocate_timings(line.start, line.end, len(chunks))
-            for chunk_text, (chunk_start, chunk_end) in zip(chunks, timings, strict=True):
-                split_lines.append(
-                    SubtitleLine(
-                        index=0,
-                        start=chunk_start,
-                        end=chunk_end,
-                        text=chunk_text,
-                    )
+            # Use word-level timing if available
+            if line.words:
+                word_chunks = _split_with_word_timing(
+                    line.words,
+                    max_width,
+                    min_width,
+                    pause_threshold,
+                    silence_threshold,
+                    remove_silence,
+                    prefer_sentence_boundaries,
                 )
+                for chunk_text, chunk_start, chunk_end in word_chunks:
+                    split_lines.append(
+                        SubtitleLine(
+                            index=0,
+                            start=chunk_start,
+                            end=chunk_end,
+                            text=chunk_text,
+                            words=None,  # Words already consumed
+                        )
+                    )
+            else:
+                # Fallback to text-based splitting with even timing distribution
+                # For English text without word timestamps, display width ≈ char count
+                fallback_max_chars = int(max_width)
+                fallback_min_chars = int(min_width)
+                chunks = _split_text_for_limits(line.text, fallback_max_chars, fallback_min_chars)
+                timings = _allocate_timings(line.start, line.end, len(chunks))
+                for chunk_text, (chunk_start, chunk_end) in zip(chunks, timings, strict=True):
+                    split_lines.append(
+                        SubtitleLine(
+                            index=0,
+                            start=chunk_start,
+                            end=chunk_end,
+                            text=chunk_text,
+                            words=None,
+                        )
+                    )
 
         # Merge neighboring lines when chunks are too short or end on soft punctuation.
+        # Use display width for merge decisions
         merged: List[SubtitleLine] = []
         for line in split_lines:
             if not merged:
@@ -276,6 +565,8 @@ class SubtitleDocument:
 
             previous = merged[-1]
             combined_text = _combine_text(previous.text, line.text)
+            combined_width = _estimate_display_width(combined_text)
+            line_width = _estimate_display_width(line.text)
             prev_trimmed = previous.text.rstrip()
             prev_ends_soft = prev_trimmed.endswith(tuple(_SOFT_BREAK_CHARS))
             prev_ends_hard = prev_trimmed.endswith(tuple(_HARD_BREAK_CHARS))
@@ -285,15 +576,24 @@ class SubtitleDocument:
                 or (prev_trimmed and prev_trimmed[-1] in _CHINESE_CONNECTIVE_CHARS)
                 or prev_last_token in _ENGLISH_CONNECTIVES
             )
-            needs_merge_for_length = len(line.text) < min_chars and len(combined_text) <= max_chars
+            
+            # Force merge extremely short lines (orphaned words) even if slightly over max_width
+            # A single orphaned word looks worse than a slightly longer line
+            ORPHAN_THRESHOLD = 12.0  # Display width threshold for orphaned lines
+            MAX_WIDTH_TOLERANCE = 1.25  # Allow 25% overage for orphan merging
+            is_orphaned = line_width < ORPHAN_THRESHOLD
+            within_tolerance = combined_width <= max_width * MAX_WIDTH_TOLERANCE
+            
+            needs_merge_for_orphan = is_orphaned and within_tolerance
+            needs_merge_for_length = line_width < min_width and combined_width <= max_width
             needs_merge_for_soft_break = (
                 prev_ends_soft
                 and not prev_ends_hard
-                and len(combined_text) <= max_chars
+                and combined_width <= max_width
             )
-            needs_merge_for_connector = prev_ends_connector and len(combined_text) <= max_chars
+            needs_merge_for_connector = prev_ends_connector and combined_width <= max_width
 
-            if needs_merge_for_length or needs_merge_for_soft_break or needs_merge_for_connector:
+            if needs_merge_for_orphan or needs_merge_for_length or needs_merge_for_soft_break or needs_merge_for_connector:
                 merged[-1] = SubtitleLine(
                     index=0,
                     start=previous.start,
@@ -305,88 +605,34 @@ class SubtitleDocument:
 
         # Reindex sequentially to keep downstream translation maps stable.
         reindexed = [
-            SubtitleLine(index=idx, start=line.start, end=line.end, text=line.text)
+            SubtitleLine(index=idx, start=line.start, end=line.end, text=line.text, words=None)
             for idx, line in enumerate(merged, start=1)
         ]
         return SubtitleDocument(lines=reindexed)
 
-    def adjust_timing(
-        self,
-        trim: float,
-        min_duration: float = 0.6,
-        gap: float = 0.04,
-        offset: float = 0.0,
-    ) -> "SubtitleDocument":
-        if trim <= 0 and offset == 0:
+    def apply_offset(self, offset: float) -> "SubtitleDocument":
+        """Apply a time offset to all subtitle lines.
+        
+        Args:
+            offset: Seconds to shift (positive delays, negative advances)
+        
+        Returns:
+            New document with adjusted timing
+        """
+        if offset == 0:
             return self
+        
         adjusted: List[SubtitleLine] = []
-        lines = self.lines
-        prev_end_base: float | None = None
-
-        for idx, line in enumerate(lines):
-            start = line.start
-            end = line.end
-            original_duration = max(line.end - line.start, 0.0)
-            if original_duration <= 0:
-                original_duration = min_duration
-
-            # Respect previous line gap.
-            if prev_end_base is not None and start < prev_end_base + gap:
-                start = prev_end_base + gap
-
-            # Only trim leading edge if there is slack beyond the required gap.
-            if trim > 0 and prev_end_base is not None:
-                slack_before = max(0.0, start - max(prev_end_base + gap, line.start))
-                start = min(start, line.end)  # safety
-                start = min(line.end, start + min(trim, slack_before))
-
-            # Trim trailing edge, prioritizing removal of silence.
-            if trim > 0:
-                available_back = max(0.0, end - start - min_duration)
-                back_trim = min(trim, available_back)
-                end -= back_trim
-
-            # Respect next line gap.
-            next_start = lines[idx + 1].start if idx + 1 < len(lines) else None
-            if next_start is not None and end > next_start - gap:
-                end = next_start - gap
-
-            # Ensure we never exceed original boundaries.
-            if start < line.start:
-                start = line.start
-            if end > line.end:
-                end = line.end
-
-            # Enforce minimum duration.
-            if end - start < min_duration:
-                target_end = start + min_duration
-                if next_start is not None and target_end > next_start - gap:
-                    target_end = min(next_start - gap, line.end)
-                    start = max(line.start, target_end - min_duration)
-                end = max(target_end, start + 0.01)
-
-            start = max(start, 0.0)
-            if end <= start:
-                end = start + min_duration
-
-            start_with_offset = start + offset
-            end_with_offset = end + offset
-            if start_with_offset < 0:
-                shift = -start_with_offset
-                start_with_offset += shift
-                end_with_offset += shift
-            if end_with_offset <= start_with_offset:
-                end_with_offset = start_with_offset + min_duration
-
+        for line in self.lines:
             adjusted_line = SubtitleLine(
                 index=line.index,
-                start=start_with_offset,
-                end=end_with_offset,
+                start=max(0.0, line.start + offset),
+                end=max(0.0, line.end + offset),
                 text=line.text,
+                words=line.words,
             )
             adjusted.append(adjusted_line)
-            prev_end_base = end
-
+        
         return SubtitleDocument(lines=adjusted)
 
     def remove_trailing_punctuation(
@@ -440,6 +686,65 @@ class SubtitleDocument:
                 )
             )
         return SubtitleDocument(lines=normalized)
+
+    def simplify_cjk_punctuation(self) -> "SubtitleDocument":
+        """Replace certain punctuation with spaces (common in Chinese subtitles).
+        
+        Replaces (stopping/pausing punctuation):
+        - Commas and periods with spaces (逗号、句号)
+        - Semicolons and colons with spaces (分号、冒号)
+        
+        Preserves (semantic/connecting punctuation):
+        - Question marks, exclamation marks (问号、感叹号)
+        - Quotation marks, book title marks (引号、书名号)
+        - Parentheses and brackets (括号)
+        - Ellipses and dashes (省略号、破折号)
+        - Middle dot (间隔号 ·) - used for foreign names like "史蒂夫·乔布斯"
+        """
+        simplified: List[SubtitleLine] = []
+        for line in self.lines:
+            text = line.text
+            
+            # Replace commas with space
+            text = text.replace("，", " ").replace(",", " ")
+            
+            # Replace periods with space (but be careful with ellipses and decimals)
+            # First protect ellipses and URLs/decimals
+            text = text.replace("......", "⟨ELLIPSIS6⟩")
+            text = text.replace("......", "⟨ELLIPSIS6⟩")
+            text = text.replace("…", "⟨ELLIPSIS⟩")
+            text = text.replace("...", "⟨ELLIPSIS3⟩")
+            # Protect decimals (e.g., "3.14")
+            text = re.sub(r'(\d)\.(\d)', r'\1⟨DOT⟩\2', text)
+            # Now replace remaining periods
+            text = text.replace("。", " ").replace(".", " ")
+            # Restore protected sequences
+            text = text.replace("⟨ELLIPSIS6⟩", "……")
+            text = text.replace("⟨ELLIPSIS⟩", "…")
+            text = text.replace("⟨ELLIPSIS3⟩", "...")
+            text = text.replace("⟨DOT⟩", ".")
+            
+            # Replace semicolons and colons with space
+            text = text.replace("；", " ").replace(";", " ")
+            text = text.replace("：", " ").replace(":", " ")
+            
+            # Normalize multiple exclamation/question marks
+            text = re.sub(r'[！!]{2,}', '！', text)
+            text = re.sub(r'[？?]{2,}', '？', text)
+            text = re.sub(r'[？?！!]+', lambda m: '？！' if '?' in m.group() and '!' in m.group() else m.group()[0], text)
+            
+            # Clean up multiple consecutive spaces
+            text = re.sub(r" {2,}", " ", text).strip()
+            
+            simplified.append(
+                SubtitleLine(
+                    index=line.index,
+                    start=line.start,
+                    end=line.end,
+                    text=text,
+                )
+            )
+        return SubtitleDocument(lines=simplified)
 
 
 def format_timestamp(seconds: float, separator: str = ",") -> str:

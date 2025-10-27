@@ -230,18 +230,15 @@ def run(
             ):
                 raw_doc = transcribe_audio(audio_path, config.whisper)
             refined_doc = raw_doc.refine(
-                max_chars=config.pipeline.max_chars_per_line,
-                min_chars=config.pipeline.min_chars_per_line,
+                max_width=config.pipeline.max_display_width,
+                min_width=config.pipeline.min_display_width,
+                pause_threshold=config.pipeline.pause_threshold_seconds,
+                silence_threshold=config.pipeline.silence_threshold_seconds,
+                remove_silence=config.pipeline.remove_silence_segments,
+                prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
             )
-            if (
-                config.pipeline.timing_trim_seconds > 0
-                or config.pipeline.timing_offset_seconds != 0
-            ):
-                refined_doc = refined_doc.adjust_timing(
-                    trim=config.pipeline.timing_trim_seconds,
-                    min_duration=config.pipeline.min_line_duration,
-                    offset=config.pipeline.timing_offset_seconds,
-                )
+            if config.pipeline.timing_offset_seconds != 0:
+                refined_doc = refined_doc.apply_offset(config.pipeline.timing_offset_seconds)
             segments_path = work_dir / f"{video.stem}_segments.json"
             segments_path.write_text(
                 json.dumps(refined_doc.to_serializable(), ensure_ascii=False, indent=2),
@@ -271,19 +268,15 @@ def run(
             logger.info("Transcribe-only mode enabled; skipping translation stage.")
 
             transcript_doc = source_doc
-            max_trans_chars = config.pipeline.translation_max_chars_per_line
-            min_trans_chars: int | None = None
-            if (
-                config.pipeline.refine_source_subtitles
-                and max_trans_chars
-            ):
-                min_trans_chars = (
-                    config.pipeline.translation_min_chars_per_line
-                    or min(config.pipeline.min_chars_per_line, max_trans_chars)
-                )
+            # Refine source subtitles if requested
+            if config.pipeline.refine_source_subtitles:
                 transcript_doc = source_doc.refine(
-                    max_chars=max_trans_chars,
-                    min_chars=min_trans_chars,
+                    max_width=config.pipeline.translation_max_display_width or 30.0,
+                    min_width=config.pipeline.translation_min_display_width or 15.0,
+                    pause_threshold=config.pipeline.pause_threshold_seconds,
+                    silence_threshold=config.pipeline.silence_threshold_seconds,
+                    remove_silence=config.pipeline.remove_silence_segments,
+                    prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
                 )
 
             source_suffix = _source_language_suffix(config.whisper.language)
@@ -368,20 +361,21 @@ def run(
         persist_translation_progress(translations_path, translations_cache)
 
         output_doc = translated_doc
-        max_trans_chars = config.pipeline.translation_max_chars_per_line
-        min_trans_chars = None
-        if max_trans_chars:
-            min_trans_chars = (
-                config.pipeline.translation_min_chars_per_line
-                or min(config.pipeline.min_chars_per_line, max_trans_chars)
-            )
-            output_doc = translated_doc.refine(
-                max_chars=max_trans_chars,
-                min_chars=min_trans_chars,
-            )
+        
+        # Refine translated subtitles using display width
+        output_doc = translated_doc.refine(
+            max_width=config.pipeline.translation_max_display_width or 30.0,
+            min_width=config.pipeline.translation_min_display_width or 15.0,
+            pause_threshold=config.pipeline.pause_threshold_seconds,
+            silence_threshold=config.pipeline.silence_threshold_seconds,
+            remove_silence=config.pipeline.remove_silence_segments,
+            prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
+        )
 
         if config.pipeline.remove_trailing_punctuation:
             output_doc = output_doc.remove_trailing_punctuation()
+        if config.pipeline.simplify_cjk_punctuation:
+            output_doc = output_doc.simplify_cjk_punctuation()
         if config.pipeline.normalize_cjk_spacing:
             output_doc = output_doc.normalize_cjk_spacing()
 
@@ -404,14 +398,14 @@ def run(
 
         if config.pipeline.save_source_subtitles:
             source_output_doc = source_doc
-            if (
-                config.pipeline.refine_source_subtitles
-                and max_trans_chars
-                and min_trans_chars is not None
-            ):
+            if config.pipeline.refine_source_subtitles:
                 source_output_doc = source_doc.refine(
-                    max_chars=max_trans_chars,
-                    min_chars=min_trans_chars,
+                    max_width=config.pipeline.translation_max_display_width or 30.0,
+                    min_width=config.pipeline.translation_min_display_width or 15.0,
+                    pause_threshold=config.pipeline.pause_threshold_seconds,
+                    silence_threshold=config.pipeline.silence_threshold_seconds,
+                    remove_silence=config.pipeline.remove_silence_segments,
+                    prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
                 )
             source_suffix = _source_language_suffix(config.whisper.language)
             source_path = _write_document(
@@ -985,51 +979,12 @@ def _wizard_step_pipeline_output(config: TransubConfig) -> None:
         "Save source language subtitles?",
         config.pipeline.save_source_subtitles,
     )
+    config.pipeline.simplify_cjk_punctuation = _wizard_ask_bool(
+        "Simplify CJK punctuation? (Replace commas/periods with spaces, common for Chinese subtitles)",
+        config.pipeline.simplify_cjk_punctuation,
+    )
 
 
-def _wizard_step_pipeline_limits(config: TransubConfig) -> None:
-    config.pipeline.max_chars_per_line = _wizard_ask_int(
-        "Maximum characters per source line",
-        default=config.pipeline.max_chars_per_line,
-        minimum=20,
-        maximum=160,
-    )
-    min_default = min(
-        config.pipeline.min_chars_per_line,
-        config.pipeline.max_chars_per_line,
-    )
-    config.pipeline.min_chars_per_line = _wizard_ask_int(
-        "Minimum characters per source line",
-        default=min_default,
-        minimum=10,
-        maximum=config.pipeline.max_chars_per_line,
-    )
-    translation_max_default = (
-        config.pipeline.translation_max_chars_per_line
-        if config.pipeline.translation_max_chars_per_line is not None
-        else 26
-    )
-    config.pipeline.translation_max_chars_per_line = _wizard_ask_int(
-        "Maximum characters per translated line",
-        default=translation_max_default,
-        minimum=10,
-        maximum=160,
-    )
-    translation_min_default = (
-        config.pipeline.translation_min_chars_per_line
-        if config.pipeline.translation_min_chars_per_line is not None
-        else 16
-    )
-    translation_min_default = min(
-        translation_min_default,
-        config.pipeline.translation_max_chars_per_line,
-    )
-    config.pipeline.translation_min_chars_per_line = _wizard_ask_int(
-        "Minimum characters per translated line",
-        default=translation_min_default,
-        minimum=1,
-        maximum=config.pipeline.translation_max_chars_per_line or 160,
-    )
 
 
 def _wizard_step_prompt(config: TransubConfig) -> None:
@@ -1130,12 +1085,6 @@ def _prompt_for_config() -> TransubConfig:
             _wizard_step_pipeline_output,
         ),
         WizardStep(
-            "pipeline-limits",
-            "Subtitle Length Limits",
-            lambda _cfg: "Control character counts for source and translated subtitles.",
-            _wizard_step_pipeline_limits,
-        ),
-        WizardStep(
             "prompt",
             "Translation Prompt",
             lambda _cfg: "Edit the system prompt or keep the default template.",
@@ -1195,6 +1144,11 @@ def _run_wizard(manager: ConfigManager, allow_overwrite: bool) -> None:
             f"Configuration saved to {manager.path}",
             style="green",
         )
+    )
+    console.print()
+    console.print(
+        "[dim]💡 Tip: You can adjust advanced options (display width, pause detection, etc.) "
+        "anytime with [bold cyan]transub configure[/bold cyan][/dim]"
     )
 
 
@@ -1583,11 +1537,13 @@ def _configure_pipeline(config: TransubConfig) -> None:
             f"Format: {pipeline.output_format} | Audio: {pipeline.audio_format}",
             f"Output dir: {pipeline.output_dir}",
             f"Keep temp audio: {_fmt_bool(pipeline.keep_temp_audio)} | Save source subtitles: {_fmt_bool(pipeline.save_source_subtitles)}",
-            f"Max line chars: {pipeline.max_chars_per_line} (min {pipeline.min_chars_per_line})",
-            f"Translated max: {pipeline.translation_max_chars_per_line} (min {pipeline.translation_min_chars_per_line})",
-            f"Timing trim: {pipeline.timing_trim_seconds}s | Offset: {pipeline.timing_offset_seconds}s | Minimum duration: {pipeline.min_line_duration}s",
-            f"Trim punctuation: {_fmt_bool(pipeline.remove_trailing_punctuation)} | CJK spacing: {_fmt_bool(pipeline.normalize_cjk_spacing)}",
-            f"Refine source export: {_fmt_bool(pipeline.refine_source_subtitles)}",
+            f"Source display width: {pipeline.max_display_width} (min {pipeline.min_display_width})",
+            f"Translation display width: {pipeline.translation_max_display_width} (min {pipeline.translation_min_display_width})",
+            f"Timing offset: {pipeline.timing_offset_seconds}s | Minimum duration: {pipeline.min_line_duration}s",
+            f"Pause threshold: {pipeline.pause_threshold_seconds}s | Silence threshold: {pipeline.silence_threshold_seconds}s",
+            f"Remove silence: {_fmt_bool(pipeline.remove_silence_segments)} | Prefer sentence boundaries: {_fmt_bool(pipeline.prefer_sentence_boundaries)}",
+            f"Trim punctuation: {_fmt_bool(pipeline.remove_trailing_punctuation)} | Simplify CJK punctuation: {_fmt_bool(pipeline.simplify_cjk_punctuation)}",
+            f"CJK spacing: {_fmt_bool(pipeline.normalize_cjk_spacing)} | Refine source export: {_fmt_bool(pipeline.refine_source_subtitles)}",
         ]
         console.print(Panel("\\n".join(summary_lines), title="Pipeline & output", border_style=THEME_COLOR))
 
@@ -1597,14 +1553,18 @@ def _configure_pipeline(config: TransubConfig) -> None:
             ("Set output directory", "dir"),
             ("Toggle keep temp audio", "keep"),
             ("Toggle save source subtitles", "save"),
-            ("Set max characters per line", "max_line"),
-            ("Set min characters per line", "min_line"),
-            ("Set translated max characters", "tmax"),
-            ("Set translated min characters", "tmin"),
-            ("Set timing trim seconds", "trim"),
+            ("Set max display width", "max_width"),
+            ("Set min display width", "min_width"),
+            ("Set translated max display width", "tmax_width"),
+            ("Set translated min display width", "tmin_width"),
+            ("Set pause threshold", "pause"),
+            ("Set silence threshold", "silence"),
+            ("Toggle remove silence segments", "remove_silence"),
+            ("Toggle prefer sentence boundaries", "sentence_boundaries"),
             ("Set timing offset seconds", "offset"),
             ("Set minimum line duration", "duration"),
             ("Toggle remove trailing punctuation", "punct"),
+            ("Toggle simplify CJK punctuation", "simplify_punct"),
             ("Toggle CJK-Latin spacing", "spacing"),
             ("Toggle refine source export", "refine_en"),
             ("Edit translation system prompt", "prompt"),
@@ -1649,46 +1609,52 @@ def _configure_pipeline(config: TransubConfig) -> None:
                 "Save source subtitles?",
                 default=pipeline.save_source_subtitles,
             )
-        elif key == "max_line":
-            pipeline.max_chars_per_line = _prompt_int(
-                "Max characters per subtitle line",
-                default=pipeline.max_chars_per_line,
-                minimum=20,
-                maximum=160,
+        elif key == "max_width":
+            pipeline.max_display_width = _prompt_float(
+                "Max display width for source subtitles (42.0 = industry standard for English)",
+                default=pipeline.max_display_width,
             )
-            if pipeline.min_chars_per_line > pipeline.max_chars_per_line:
-                pipeline.min_chars_per_line = pipeline.max_chars_per_line
-        elif key == "min_line":
-            pipeline.min_chars_per_line = _prompt_int(
-                "Min characters per subtitle line",
-                default=pipeline.min_chars_per_line,
-                minimum=10,
-                maximum=pipeline.max_chars_per_line,
+            if pipeline.min_display_width > pipeline.max_display_width:
+                pipeline.min_display_width = pipeline.max_display_width
+        elif key == "min_width":
+            pipeline.min_display_width = _prompt_float(
+                "Min display width for source subtitles",
+                default=pipeline.min_display_width,
             )
-        elif key == "tmax":
-            pipeline.translation_max_chars_per_line = _prompt_int(
-                "Max characters per translated line",
-                default=pipeline.translation_max_chars_per_line or 26,
-                minimum=10,
-                maximum=160,
+        elif key == "tmax_width":
+            pipeline.translation_max_display_width = _prompt_float(
+                "Max display width for translated subtitles (30.0 suitable for CJK)",
+                default=pipeline.translation_max_display_width or 30.0,
             )
             if (
-                pipeline.translation_min_chars_per_line
-                and pipeline.translation_min_chars_per_line > pipeline.translation_max_chars_per_line
+                pipeline.translation_min_display_width
+                and pipeline.translation_min_display_width > pipeline.translation_max_display_width
             ):
-                pipeline.translation_min_chars_per_line = pipeline.translation_max_chars_per_line
-        elif key == "tmin":
-            max_chars = pipeline.translation_max_chars_per_line or 160
-            pipeline.translation_min_chars_per_line = _prompt_int(
-                "Min characters per translated line",
-                default=pipeline.translation_min_chars_per_line or 16,
-                minimum=1,
-                maximum=max_chars,
+                pipeline.translation_min_display_width = pipeline.translation_max_display_width
+        elif key == "tmin_width":
+            pipeline.translation_min_display_width = _prompt_float(
+                "Min display width for translated subtitles",
+                default=pipeline.translation_min_display_width or 15.0,
             )
-        elif key == "trim":
-            pipeline.timing_trim_seconds = _prompt_float(
-                "Timing trim seconds",
-                pipeline.timing_trim_seconds,
+        elif key == "pause":
+            pipeline.pause_threshold_seconds = _prompt_float(
+                "Pause threshold seconds (minimum gap to consider as natural pause)",
+                pipeline.pause_threshold_seconds,
+            )
+        elif key == "silence":
+            pipeline.silence_threshold_seconds = _prompt_float(
+                "Silence threshold seconds (minimum gap to consider as silence)",
+                pipeline.silence_threshold_seconds,
+            )
+        elif key == "remove_silence":
+            pipeline.remove_silence_segments = Confirm.ask(
+                "Remove silence segments?",
+                default=pipeline.remove_silence_segments,
+            )
+        elif key == "sentence_boundaries":
+            pipeline.prefer_sentence_boundaries = Confirm.ask(
+                "Prefer splitting at sentence/phrase boundaries?",
+                default=pipeline.prefer_sentence_boundaries,
             )
         elif key == "offset":
             pipeline.timing_offset_seconds = _prompt_float(
@@ -1704,6 +1670,11 @@ def _configure_pipeline(config: TransubConfig) -> None:
             pipeline.remove_trailing_punctuation = Confirm.ask(
                 "Remove trailing punctuation?",
                 default=pipeline.remove_trailing_punctuation,
+            )
+        elif key == "simplify_punct":
+            pipeline.simplify_cjk_punctuation = Confirm.ask(
+                "Simplify CJK punctuation (replace commas and periods with spaces)?",
+                default=pipeline.simplify_cjk_punctuation,
             )
         elif key == "spacing":
             pipeline.normalize_cjk_spacing = Confirm.ask(

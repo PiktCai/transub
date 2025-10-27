@@ -148,6 +148,10 @@ class WhisperConfig(BaseModel):
         default=None,
         description="Optional initial prompt to guide Whisper's segmentation and terminology.",
     )
+    word_timestamps: bool = Field(
+        default=True,
+        description="Extract word-level timestamps for more accurate subtitle timing (strongly recommended).",
+    )
 
     @model_validator(mode="after")
     def validate_backend(self) -> "WhisperConfig":
@@ -210,23 +214,21 @@ class PipelineConfig(BaseModel):
         default=True,
         description="Whether to save the intermediate source-language subtitles",
     )
-    max_chars_per_line: int = Field(
-        default=54,
-        ge=20,
-        le=160,
-        description="Maximum characters per subtitle line after refinement",
+    max_display_width: float = Field(
+        default=42.0,
+        ge=20.0,
+        le=100.0,
+        description="Maximum display width for subtitles (industry standard: 42 for English, CJK chars count as 2)",
     )
-    min_chars_per_line: int = Field(
-        default=22,
-        ge=10,
-        le=120,
-        description="Preferred minimum characters per subtitle line",
+    min_display_width: float = Field(
+        default=20.0,
+        ge=5.0,
+        le=80.0,
+        description="Minimum display width to avoid very short subtitle lines",
     )
-    timing_trim_seconds: float = Field(
-        default=0.15,
-        ge=0.0,
-        le=1.0,
-        description="Seconds trimmed from start/end of each subtitle for tighter timing",
+    prefer_sentence_boundaries: bool = Field(
+        default=True,
+        description="Prefer splitting at sentence/phrase boundaries for better readability",
     )
     timing_offset_seconds: float = Field(
         default=0.0,
@@ -252,21 +254,41 @@ class PipelineConfig(BaseModel):
         default=DEFAULT_TRANSLATION_PROMPT,
         description="System prompt prepended to LLM translation requests",
     )
-    translation_max_chars_per_line: int | None = Field(
-        default=26,
-        ge=10,
-        le=160,
-        description="Maximum characters per translated subtitle line (None to disable post-translation reflow)",
+    translation_max_display_width: float | None = Field(
+        default=30.0,
+        ge=15.0,
+        le=80.0,
+        description="Maximum display width for translated subtitles (30.0 suitable for CJK languages)",
     )
-    translation_min_chars_per_line: int | None = Field(
-        default=16,
-        ge=1,
-        le=120,
-        description="Preferred minimum characters per translated subtitle line",
+    translation_min_display_width: float | None = Field(
+        default=15.0,
+        ge=5.0,
+        le=60.0,
+        description="Minimum display width for translated subtitles",
     )
     refine_source_subtitles: bool = Field(
         default=False,
         description="Whether to re-refine and reflow source subtitles on export",
+    )
+    simplify_cjk_punctuation: bool = Field(
+        default=False,
+        description="Replace commas and periods with spaces in CJK subtitles (common style for Chinese subtitles)",
+    )
+    pause_threshold_seconds: float = Field(
+        default=0.3,
+        ge=0.1,
+        le=2.0,
+        description="Minimum gap between words to consider as a natural pause (used for smart splitting with word_timestamps)",
+    )
+    silence_threshold_seconds: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=10.0,
+        description="Minimum gap between words to consider as silence (such segments can be removed)",
+    )
+    remove_silence_segments: bool = Field(
+        default=True,
+        description="Remove subtitle segments that contain only long silences (requires word_timestamps)",
     )
 
     @model_validator(mode="after")
@@ -281,15 +303,15 @@ class PipelineConfig(BaseModel):
                 "audio_format must be one of wav, mp3, flac, m4a, ogg"
             )
         object.__setattr__(self, "audio_format", audio_fmt)
-        if self.min_chars_per_line > self.max_chars_per_line:
-            raise ValueError("min_chars_per_line cannot exceed max_chars_per_line")
+        if self.min_display_width > self.max_display_width:
+            raise ValueError("min_display_width cannot exceed max_display_width")
         if (
-            self.translation_max_chars_per_line is not None
-            and self.translation_min_chars_per_line is not None
-            and self.translation_min_chars_per_line > self.translation_max_chars_per_line
+            self.translation_max_display_width is not None
+            and self.translation_min_display_width is not None
+            and self.translation_min_display_width > self.translation_max_display_width
         ):
             raise ValueError(
-                "translation_min_chars_per_line cannot exceed translation_max_chars_per_line"
+                "translation_min_display_width cannot exceed translation_max_display_width"
             )
         return self
 
