@@ -26,6 +26,13 @@ class TranslationChunk:
     lines: List[SubtitleLine]
 
 
+@dataclass
+class ParsedChunkResult:
+    translations: Dict[str, str]
+    missing_keys: List[str]
+    unexpected_keys: List[str]
+
+
 class LLMTranslator:
     def __init__(self, config: LLMConfig, pipeline: PipelineConfig) -> None:
         self.config = config
@@ -61,22 +68,19 @@ class LLMTranslator:
         for chunk_index, chunk in enumerate(self._iter_chunks(document), start=1):
             if all(str(line.index) in translations for line in chunk.lines):
                 continue
-            payload = self._build_payload(chunk_index, chunk)
+            pending_lines = [
+                line for line in chunk.lines if str(line.index) not in translations
+            ]
+            if not pending_lines:
+                continue
             attempt = 0
-            while True:
+            while pending_lines:
+                pending_chunk = TranslationChunk(index=chunk.index, lines=pending_lines)
+                payload = self._build_payload(chunk_index, pending_chunk)
                 try:
                     response = self._invoke(payload)
-                    chunk_translations = self._parse_response(response, chunk)
+                    result = self._parse_response(response, pending_chunk)
                     self._update_usage(response.get("usage") or {})
-                    update_payload: Dict[str, str] = {}
-                    for line, translation in zip(
-                        chunk.lines, chunk_translations, strict=True
-                    ):
-                        translations[str(line.index)] = translation
-                        update_payload[str(line.index)] = translation
-                    if progress_callback and update_payload:
-                        progress_callback(update_payload)
-                    break
                 except (requests.RequestException, json.JSONDecodeError, LLMTranslationError) as exc:
                     attempt += 1
                     if attempt > self.config.max_retries:
@@ -84,6 +88,39 @@ class LLMTranslator:
                             f"Failed to translate chunk {chunk_index}: {exc}"
                         ) from exc
                     time.sleep(2**attempt * 0.5)
+                    continue
+
+                update_payload: Dict[str, str] = {}
+                for line in pending_lines:
+                    key = str(line.index)
+                    translation = result.translations.get(key)
+                    if translation is not None:
+                        translations[key] = translation
+                        update_payload[key] = translation
+
+                if progress_callback and update_payload:
+                    progress_callback(update_payload)
+
+                unexpected = [
+                    key for key in result.unexpected_keys if key not in translations
+                ]
+                if unexpected:
+                    raise LLMTranslationError(
+                        f"Received unexpected keys in translation: {', '.join(unexpected)}"
+                    )
+
+                if not result.missing_keys:
+                    break
+
+                pending_lines = [
+                    line for line in pending_lines if str(line.index) in result.missing_keys
+                ]
+                attempt += 1
+                if attempt > self.config.max_retries:
+                    raise LLMTranslationError(
+                        f"Failed to translate chunk {chunk_index}: Missing translations for keys: {', '.join(result.missing_keys)}"
+                    )
+                time.sleep(2**attempt * 0.5)
         final_lines: List[SubtitleLine] = []
         for line in document.lines:
             translated_text = translations.get(str(line.index))
@@ -162,7 +199,7 @@ class LLMTranslator:
                 f"{preview}"
             ) from exc
 
-    def _parse_response(self, response: dict, chunk: TranslationChunk) -> List[str]:
+    def _parse_response(self, response: dict, chunk: TranslationChunk) -> ParsedChunkResult:
         choices = response.get("choices")
         if not choices:
             raise LLMTranslationError("LLM response missing choices")
@@ -175,26 +212,26 @@ class LLMTranslator:
             raise LLMTranslationError("Translation response must be a JSON object.")
 
         expected_keys = [str(line.index) for line in chunk.lines]
-        missing_keys = [key for key in expected_keys if key not in parsed]
-        extra_keys = [key for key in parsed.keys() if key not in expected_keys]
-        if missing_keys:
-            raise LLMTranslationError(
-                f"Missing translations for keys: {', '.join(missing_keys)}"
-            )
-        if extra_keys:
-            raise LLMTranslationError(
-                f"Received unexpected keys in translation: {', '.join(extra_keys)}"
-            )
+        translations: Dict[str, str] = {}
 
-        cleaned: List[str] = []
         for key in expected_keys:
+            if key not in parsed:
+                continue
             value = parsed[key]
             if not isinstance(value, str):
                 raise LLMTranslationError(
                     f"Translation value for key {key} is not a string"
                 )
-            cleaned.append(value.strip())
-        return cleaned
+            translations[key] = value.strip()
+
+        unexpected_keys = [key for key in parsed.keys() if key not in expected_keys]
+        missing_keys = [key for key in expected_keys if key not in translations]
+
+        return ParsedChunkResult(
+            translations=translations,
+            missing_keys=missing_keys,
+            unexpected_keys=unexpected_keys,
+        )
 
     def _load_json_response(self, content: str) -> dict:
         """Attempt to parse JSON content, tolerating Markdown fencing."""
