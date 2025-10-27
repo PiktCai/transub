@@ -232,6 +232,8 @@ def run(
             refined_doc = raw_doc.refine(
                 max_width=config.pipeline.max_display_width,
                 min_width=config.pipeline.min_display_width,
+                min_duration=config.pipeline.min_line_duration,
+                max_cps=config.pipeline.max_cps,
                 pause_threshold=config.pipeline.pause_threshold_seconds,
                 silence_threshold=config.pipeline.silence_threshold_seconds,
                 remove_silence=config.pipeline.remove_silence_segments,
@@ -273,6 +275,8 @@ def run(
                 transcript_doc = source_doc.refine(
                     max_width=config.pipeline.translation_max_display_width or 30.0,
                     min_width=config.pipeline.translation_min_display_width or 15.0,
+                    min_duration=config.pipeline.min_line_duration,
+                    max_cps=config.pipeline.max_cps,
                     pause_threshold=config.pipeline.pause_threshold_seconds,
                     silence_threshold=config.pipeline.silence_threshold_seconds,
                     remove_silence=config.pipeline.remove_silence_segments,
@@ -366,6 +370,8 @@ def run(
         output_doc = translated_doc.refine(
             max_width=config.pipeline.translation_max_display_width or 30.0,
             min_width=config.pipeline.translation_min_display_width or 15.0,
+            min_duration=config.pipeline.min_line_duration,
+            max_cps=config.pipeline.max_cps,
             pause_threshold=config.pipeline.pause_threshold_seconds,
             silence_threshold=config.pipeline.silence_threshold_seconds,
             remove_silence=config.pipeline.remove_silence_segments,
@@ -402,6 +408,8 @@ def run(
                 source_output_doc = source_doc.refine(
                     max_width=config.pipeline.translation_max_display_width or 30.0,
                     min_width=config.pipeline.translation_min_display_width or 15.0,
+                    min_duration=config.pipeline.min_line_duration,
+                    max_cps=config.pipeline.max_cps,
                     pause_threshold=config.pipeline.pause_threshold_seconds,
                     silence_threshold=config.pipeline.silence_threshold_seconds,
                     remove_silence=config.pipeline.remove_silence_segments,

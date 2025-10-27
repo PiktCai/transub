@@ -237,10 +237,16 @@ class PipelineConfig(BaseModel):
         description="Shift applied to subtitle start/end times (positive delays subtitles, negative moves earlier)",
     )
     min_line_duration: float = Field(
-        default=0.6,
-        ge=0.1,
+        default=1.2,
+        ge=0.5,
         le=5.0,
-        description="Minimum duration (seconds) each subtitle should stay on screen",
+        description="Minimum duration (seconds) each subtitle should stay on screen (professional standard: 1.0-1.5s)",
+    )
+    max_cps: float = Field(
+        default=20.0,
+        ge=10.0,
+        le=30.0,
+        description="Maximum characters per second (CPS) to prevent information overload (20 for mixed text, 12-15 for CJK-only)",
     )
     remove_trailing_punctuation: bool = Field(
         default=True,

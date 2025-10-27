@@ -7,8 +7,9 @@ All notable changes to this project will be documented in this file.
 ### 🚨 BREAKING CHANGES
 
 - **Removed legacy config parameters**: Character-based limits (`max_chars_per_line`, `translation_max_chars_per_line`, etc.) replaced by display width parameters (`max_display_width`, `translation_max_display_width`, etc.). `timing_trim_seconds` removed in favor of automatic pause detection.
-- **API changes**: `adjust_timing()` method replaced by `apply_offset()`. `refine()` now uses `max_width`/`min_width` instead of `max_chars`/`min_chars`.
+- **API changes**: `adjust_timing()` method replaced by `apply_offset()`. `refine()` now requires `min_duration` parameter (default: 1.2s).
 - **Word-level timestamps enabled by default**: All Whisper backends now extract word-level timestamps for precise timing.
+- **`min_line_duration` default changed**: Increased from 0.6s to 1.2s to meet professional subtitle standards and eliminate "flash" subtitles.
 
 ### Added
 
@@ -26,6 +27,13 @@ All notable changes to this project will be documented in this file.
 
 ### Improved
 
+- **Duration-aware merging**: Short-duration segments now automatically merge to avoid "flash" subtitles (respecting professional standard: <1s segments ≤5%)
+  - Merging respects long silence gaps and won't merge across intentional splits
+  - Significantly reduces short subtitle flashes while maintaining readability
+- **CPS (Characters Per Second) control**: New `max_cps` parameter prevents information overload
+  - Default: 20.0 for mixed text (suitable for English with numbers/symbols)
+  - Recommended: 12-15 for CJK-only content
+  - All merge operations now respect CPS limits to ensure comfortable reading speed
 - Faster splitting algorithm, accurate timing without manual tuning, better handling of varied speech patterns
 
 ## [0.1.2] - 2025-10-26

@@ -171,7 +171,8 @@ class SubtitleDocumentTest(unittest.TestCase):
         ]
         doc = SubtitleDocument(lines=lines)
 
-        refined_doc = doc.refine(max_width=120, min_width=15)
+        # CPS = 119 chars / 4.0s = 29.75, so we need to allow higher CPS for this test
+        refined_doc = doc.refine(max_width=120, min_width=15, max_cps=35.0)
         self.assertEqual(len(refined_doc.lines), 1)
         self.assertTrue(
             refined_doc.lines[0].text.endswith("carrier boards."),

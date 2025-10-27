@@ -492,6 +492,8 @@ class SubtitleDocument:
         self,
         max_width: float = 42.0,
         min_width: float = 20.0,
+        min_duration: float = 1.2,
+        max_cps: float = 20.0,
         pause_threshold: float = 0.3,
         silence_threshold: float = 2.0,
         remove_silence: bool = True,
@@ -502,6 +504,8 @@ class SubtitleDocument:
         Args:
             max_width: Maximum display width (42.0 = industry standard for English)
             min_width: Minimum display width (20.0 avoids very short lines)
+            min_duration: Minimum duration in seconds (1.2s = professional standard to avoid "flash" subtitles)
+            max_cps: Maximum characters per second (20.0 for mixed text, 12-15 for CJK-only)
             pause_threshold: Minimum gap for natural pauses (default 0.3s)
             silence_threshold: Minimum gap to consider as silence (default 2.0s)
             remove_silence: Whether to skip silence segments (default True)
@@ -577,6 +581,20 @@ class SubtitleDocument:
                 or prev_last_token in _ENGLISH_CONNECTIVES
             )
             
+            # Calculate durations and CPS
+            line_duration = line.end - line.start
+            prev_duration = previous.end - previous.start
+            gap_between = line.start - previous.end
+            combined_duration = line.end - previous.start
+            
+            # Calculate CPS (Characters Per Second) for the combined line
+            # Use character count (not display width) for CPS calculation
+            combined_char_count = len(combined_text)
+            combined_cps = combined_char_count / combined_duration if combined_duration > 0 else 0
+            
+            # Professional standard: CPS should not exceed max_cps to prevent information overload
+            cps_ok = combined_cps <= max_cps
+            
             # Force merge extremely short lines (orphaned words) even if slightly over max_width
             # A single orphaned word looks worse than a slightly longer line
             ORPHAN_THRESHOLD = 12.0  # Display width threshold for orphaned lines
@@ -584,16 +602,28 @@ class SubtitleDocument:
             is_orphaned = line_width < ORPHAN_THRESHOLD
             within_tolerance = combined_width <= max_width * MAX_WIDTH_TOLERANCE
             
-            needs_merge_for_orphan = is_orphaned and within_tolerance
-            needs_merge_for_length = line_width < min_width and combined_width <= max_width
+            # Professional standard: merge short-duration segments to avoid "flash" subtitles
+            # But don't merge across natural pauses or long silence gaps (those are intentional splits)
+            has_natural_pause = gap_between >= pause_threshold
+            has_long_gap = gap_between >= silence_threshold
+            # Merge if current line is too short, but only if there's no natural pause between them
+            is_short_duration = line_duration < min_duration and not has_natural_pause and not has_long_gap
+            
+            # All merge conditions must respect CPS limit to prevent information overload
+            # For duration-based merging, allow up to 20% width overage to prioritize avoiding "flash" subtitles
+            DURATION_WIDTH_TOLERANCE = 1.2
+            needs_merge_for_orphan = is_orphaned and within_tolerance and cps_ok
+            needs_merge_for_length = line_width < min_width and combined_width <= max_width and cps_ok
+            needs_merge_for_duration = is_short_duration and combined_width <= max_width * DURATION_WIDTH_TOLERANCE and cps_ok
             needs_merge_for_soft_break = (
                 prev_ends_soft
                 and not prev_ends_hard
                 and combined_width <= max_width
+                and cps_ok
             )
-            needs_merge_for_connector = prev_ends_connector and combined_width <= max_width
+            needs_merge_for_connector = prev_ends_connector and combined_width <= max_width and cps_ok
 
-            if needs_merge_for_orphan or needs_merge_for_length or needs_merge_for_soft_break or needs_merge_for_connector:
+            if needs_merge_for_orphan or needs_merge_for_length or needs_merge_for_duration or needs_merge_for_soft_break or needs_merge_for_connector:
                 merged[-1] = SubtitleLine(
                     index=0,
                     start=previous.start,
