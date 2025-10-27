@@ -200,12 +200,12 @@ def _split_with_word_timing(
                         if reason == "neutral":
                             reason = "pause"
                 
-                # 4. Optimal width (prefer ~80-90% of max width)
+                # 4. Optimal width (prefer ~75-90% of max width, but don't aggressively push to max)
                 width_ratio = current_width / max_width
-                if 0.8 <= width_ratio <= 0.95:
+                if 0.75 <= width_ratio <= 0.90:
                     priority += 20.0  # Bonus for good length
-                elif width_ratio > 0.95:
-                    priority += 40.0  # Strong preference near max to use space efficiently
+                elif width_ratio > 0.90:
+                    priority += 10.0  # Small bonus for being close to max, but don't force it
                 
                 if priority > 0 or i == len(words) - 1:
                     split_candidates.append((i, priority, reason))
@@ -610,8 +610,8 @@ class SubtitleDocument:
             is_short_duration = line_duration < min_duration and not has_natural_pause and not has_long_gap
             
             # All merge conditions must respect CPS limit to prevent information overload
-            # For duration-based merging, allow up to 20% width overage to prioritize avoiding "flash" subtitles
-            DURATION_WIDTH_TOLERANCE = 1.2
+            # For duration-based merging, allow up to 40% width overage to prioritize avoiding "flash" subtitles
+            DURATION_WIDTH_TOLERANCE = 1.4
             needs_merge_for_orphan = is_orphaned and within_tolerance and cps_ok
             needs_merge_for_length = line_width < min_width and combined_width <= max_width and cps_ok
             needs_merge_for_duration = is_short_duration and combined_width <= max_width * DURATION_WIDTH_TOLERANCE and cps_ok

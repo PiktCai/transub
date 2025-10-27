@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2025-10-27
+
+### Improved
+
+- **Subtitle splitting logic**: Adjusted line splitting algorithm to favor natural semantic boundaries over maximizing line length. This results in shorter, more readable lines, aligning the style closer to professional subtitle standards.
+- **Subtitle rhythm and stability**: Made the merging logic for short-duration subtitles more aggressive. This significantly reduces the "flickering" of very short lines, providing a smoother and more stable viewing experience.
+
 ## [0.2.0] - 2025-10-27
 
 ### 🚨 BREAKING CHANGES
