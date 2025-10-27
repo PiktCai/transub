@@ -211,13 +211,13 @@ class PipelineConfig(BaseModel):
         description="Whether to save the intermediate source-language subtitles",
     )
     max_chars_per_line: int = Field(
-        default=60,
+        default=54,
         ge=20,
         le=160,
         description="Maximum characters per subtitle line after refinement",
     )
     min_chars_per_line: int = Field(
-        default=25,
+        default=22,
         ge=10,
         le=120,
         description="Preferred minimum characters per subtitle line",

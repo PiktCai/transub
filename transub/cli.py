@@ -25,7 +25,12 @@ from .state import (
     persist_translation_progress,
 )
 from .subtitles import SubtitleDocument
-from .transcribe import TranscriptionError, transcribe_audio, check_dependencies
+from .transcribe import (
+    TranscriptionError,
+    transcribe_audio,
+    check_dependencies,
+    DEFAULT_OPENAI_TRANSCRIBE_URL,
+)
 from .translate import LLMTranslationError, translate_subtitles
 
 THEME_COLOR = "#33c9b2"
@@ -1663,7 +1668,7 @@ def _configure_pipeline(config: TransubConfig) -> None:
         elif key == "tmax":
             pipeline.translation_max_chars_per_line = _prompt_int(
                 "Max characters per translated line",
-                default=pipeline.translation_max_chars_per_line or 36,
+                default=pipeline.translation_max_chars_per_line or 26,
                 minimum=10,
                 maximum=160,
             )
@@ -1676,7 +1681,7 @@ def _configure_pipeline(config: TransubConfig) -> None:
             max_chars = pipeline.translation_max_chars_per_line or 160
             pipeline.translation_min_chars_per_line = _prompt_int(
                 "Min characters per translated line",
-                default=pipeline.translation_min_chars_per_line or 4,
+                default=pipeline.translation_min_chars_per_line or 16,
                 minimum=1,
                 maximum=max_chars,
             )
