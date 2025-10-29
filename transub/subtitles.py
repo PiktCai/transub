@@ -721,8 +721,8 @@ class SubtitleDocument:
         """Replace certain punctuation with spaces (common in Chinese subtitles).
         
         Replaces (stopping/pausing punctuation):
-        - Commas and periods with spaces (逗号、句号)
-        - Semicolons and colons with spaces (分号、冒号)
+        - Commas and periods with double spaces (逗号、句号)
+        - Semicolons with double spaces (分号)
         
         Preserves (semantic/connecting punctuation):
         - Question marks, exclamation marks (问号、感叹号)
@@ -735,8 +735,8 @@ class SubtitleDocument:
         for line in self.lines:
             text = line.text
             
-            # Replace commas with space
-            text = text.replace("，", " ").replace(",", " ")
+            # Replace commas with double space for clearer visual separation
+            text = re.sub(r"[ \t]*[，,][ \t]*", "  ", text)
             
             # Replace periods with space (but be careful with ellipses and decimals)
             # First protect ellipses and URLs/decimals
@@ -746,25 +746,24 @@ class SubtitleDocument:
             text = text.replace("...", "⟨ELLIPSIS3⟩")
             # Protect decimals (e.g., "3.14")
             text = re.sub(r'(\d)\.(\d)', r'\1⟨DOT⟩\2', text)
-            # Now replace remaining periods
-            text = text.replace("。", " ").replace(".", " ")
+            # Now replace remaining periods with double space
+            text = re.sub(r"[ \t]*[。\.][ \t]*", "  ", text)
             # Restore protected sequences
             text = text.replace("⟨ELLIPSIS6⟩", "……")
             text = text.replace("⟨ELLIPSIS⟩", "…")
             text = text.replace("⟨ELLIPSIS3⟩", "...")
             text = text.replace("⟨DOT⟩", ".")
             
-            # Replace semicolons and colons with space
-            text = text.replace("；", " ").replace(";", " ")
-            text = text.replace("：", " ").replace(":", " ")
+            # Replace semicolons with double space; keep colons for readability
+            text = re.sub(r"[ \t]*[；;][ \t]*", "  ", text)
             
             # Normalize multiple exclamation/question marks
             text = re.sub(r'[！!]{2,}', '！', text)
             text = re.sub(r'[？?]{2,}', '？', text)
             text = re.sub(r'[？?！!]+', lambda m: '？！' if '?' in m.group() and '!' in m.group() else m.group()[0], text)
             
-            # Clean up multiple consecutive spaces
-            text = re.sub(r" {2,}", " ", text).strip()
+            # Clean up excessive spaces while keeping deliberate double spaces
+            text = re.sub(r" {3,}", "  ", text).strip()
             
             simplified.append(
                 SubtitleLine(

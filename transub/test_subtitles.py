@@ -219,8 +219,8 @@ class SubtitleDocumentTest(unittest.TestCase):
         ]
         doc = SubtitleDocument(lines=lines)
         simplified = doc.simplify_cjk_punctuation()
-        self.assertEqual(simplified.lines[0].text, "你好 世界")
-        self.assertEqual(simplified.lines[1].text, "Hello world")
+        self.assertEqual(simplified.lines[0].text, "你好  世界")
+        self.assertEqual(simplified.lines[1].text, "Hello  world")
 
     def test_simplify_cjk_punctuation_preserves_important_marks(self):
         """Test that important punctuation is preserved."""
@@ -270,15 +270,15 @@ class SubtitleDocumentTest(unittest.TestCase):
         self.assertEqual(simplified.lines[1].text, "价格是99.99元")
 
     def test_simplify_cjk_punctuation_handles_semicolon_colon(self):
-        """Test semicolon and colon replacement."""
+        """Semicolons become double spaces while colons are preserved."""
         lines = [
             SubtitleLine(index=1, start=0.0, end=1.0, text="注意：这很重要；记住了。"),
             SubtitleLine(index=2, start=1.0, end=2.0, text="Note: very important; remember."),
         ]
         doc = SubtitleDocument(lines=lines)
         simplified = doc.simplify_cjk_punctuation()
-        self.assertEqual(simplified.lines[0].text, "注意 这很重要 记住了")
-        self.assertEqual(simplified.lines[1].text, "Note very important remember")
+        self.assertEqual(simplified.lines[0].text, "注意：这很重要  记住了")
+        self.assertEqual(simplified.lines[1].text, "Note: very important  remember")
 
     def test_simplify_cjk_punctuation_normalizes_repeated_marks(self):
         """Test that repeated exclamation/question marks are normalized."""
@@ -297,14 +297,14 @@ class SubtitleDocumentTest(unittest.TestCase):
         self.assertEqual(simplified.lines[2].text, "不会吧？")
 
     def test_simplify_cjk_punctuation_cleans_spaces(self):
-        """Test that multiple spaces are cleaned up."""
+        """Test that spaces are capped at a double space."""
         lines = [
             SubtitleLine(index=1, start=0.0, end=1.0, text="你好，  世界。  再见。"),
         ]
         doc = SubtitleDocument(lines=lines)
         simplified = doc.simplify_cjk_punctuation()
-        # No consecutive spaces
-        self.assertEqual(simplified.lines[0].text, "你好 世界 再见")
+        # Capped at double spaces
+        self.assertEqual(simplified.lines[0].text, "你好  世界  再见")
 
 
     def test_refine_with_word_timestamps(self):
