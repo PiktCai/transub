@@ -11,6 +11,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 import requests
 
 from .config import LLMConfig, PipelineConfig
+from .smart_retry import SmartRetryHandler, ErrorType
 from .subtitles import SubtitleDocument, SubtitleLine
 
 DEFAULT_OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
@@ -54,6 +55,11 @@ class LLMTranslator:
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.total_tokens = 0
+        
+        # Initialize smart retry handler
+        self.retry_handler = SmartRetryHandler(
+            enable_circuit_breaker=True,
+        )
 
     def translate_document(
         self,
@@ -78,10 +84,12 @@ class LLMTranslator:
                 pending_chunk = TranslationChunk(index=chunk.index, lines=pending_lines)
                 payload = self._build_payload(chunk_index, pending_chunk)
                 try:
-                    response = self._invoke(payload)
+                    # Use smart retry handler for API calls
+                    response = self.retry_handler.execute_with_retry(self._invoke, payload)
                     result = self._parse_response(response, pending_chunk)
                     self._update_usage(response.get("usage") or {})
                 except (requests.RequestException, json.JSONDecodeError, LLMTranslationError) as exc:
+                    # Fallback to original retry logic for parsing errors
                     attempt += 1
                     if attempt > self.config.max_retries:
                         raise LLMTranslationError(
@@ -120,7 +128,8 @@ class LLMTranslator:
                     raise LLMTranslationError(
                         f"Failed to translate chunk {chunk_index}: Missing translations for keys: {', '.join(result.missing_keys)}"
                     )
-                time.sleep(2**attempt * 0.5)
+                # Use shorter delay for missing translation keys (not API errors)
+                time.sleep(min(2**attempt * 0.2, 2.0))
         final_lines: List[SubtitleLine] = []
         for line in document.lines:
             translated_text = translations.get(str(line.index))
