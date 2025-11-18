@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch, MagicMock
 import requests
 
-from .smart_retry import (
+from transub.smart_retry import (
     SmartRetryHandler,
     ErrorType,
     RetryRule,

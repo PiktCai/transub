@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 import requests
 
-from .smart_retry import SmartRetryHandler, ErrorType
+from transub.smart_retry import SmartRetryHandler, ErrorType
 
 
 class MockAPIClient:

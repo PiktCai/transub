@@ -51,30 +51,18 @@ Intermediate state is cached so interrupted runs can resume without repeating ea
 
 ### 2. Install Transub
 
-**Option A: Using `pipx` (Recommended)**
+Using `uv` (Recommended)
 
-`pipx` installs Python CLI tools in an isolated environment, which is the cleanest way to put `transub` on your `PATH`.
+`uv` is a fast Python package installer and resolver. It installs CLI tools in isolated environments.
 
 ```bash
-pipx install transub
+uv tool install transub
 ```
 
 To update later, run:
 
 ```bash
-pipx upgrade transub
-```
-
-**Option B: Using `pip`**
-
-```bash
-pip install transub
-```
-
-Upgrade with:
-
-```bash
-pip install --upgrade transub
+uv tool upgrade transub
 ```
 
 ### 3. Install a Whisper Backend (Optional)

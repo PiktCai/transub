@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2025-10-27
+
+### Added
+- **Smart retry handler**: Improved API call resilience with intelligent retry logic for better reliability
+- **CJK punctuation handling**: Enhanced punctuation processing for Chinese, Japanese, and Korean text
+
+### Fixed
+- **Translation retry logic**: Improved handling of partial responses from LLM APIs
+- **Subtitle splitting**: Refined splitting algorithm for better rhythm and readability
+
+### Improved
+- Better error handling and retry mechanisms for API calls
+- Enhanced subtitle processing stability
+
 ## [0.2.1] - 2025-10-27
 
 ### Improved

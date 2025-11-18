@@ -10,10 +10,10 @@ import unittest
 from unittest.mock import patch, AsyncMock
 from typing import Dict, List
 
-from .concurrent_translate import ConcurrentTranslationManager, translate_document_concurrent
-from .translate import LLMTranslator, translate_subtitles
-from .subtitles import SubtitleDocument, SubtitleLine
-from .config import LLMConfig, PipelineConfig
+from transub.concurrent_translate import ConcurrentTranslationManager, translate_document_concurrent
+from transub.translate import LLMTranslator, translate_subtitles
+from transub.subtitles import SubtitleDocument, SubtitleLine
+from transub.config import LLMConfig, PipelineConfig
 
 
 class MockSerialTranslator:

@@ -10,10 +10,10 @@ import unittest
 from unittest.mock import patch, AsyncMock
 from typing import Dict, List
 
-from .concurrent_translate import ConcurrentTranslationManager, TranslationResult, TranslationTask
-from .subtitles import SubtitleDocument, SubtitleLine
-from .config import LLMConfig, PipelineConfig
-from .translate import TranslationChunk
+from transub.concurrent_translate import ConcurrentTranslationManager, TranslationResult, TranslationTask
+from transub.subtitles import SubtitleDocument, SubtitleLine
+from transub.config import LLMConfig, PipelineConfig
+from transub.translate import TranslationChunk
 
 
 class TestConcurrentDemo(unittest.TestCase):

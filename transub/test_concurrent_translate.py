@@ -10,16 +10,16 @@ import unittest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Dict, List
 
-from .concurrent_translate import (
+from transub.concurrent_translate import (
     ConcurrentTranslationManager,
     TranslationTask,
     TranslationResult,
     RateLimiter,
     translate_document_concurrent,
 )
-from .subtitles import SubtitleDocument, SubtitleLine
-from .config import LLMConfig, PipelineConfig
-from .translate import LLMTranslationError
+from transub.subtitles import SubtitleDocument, SubtitleLine
+from transub.config import LLMConfig, PipelineConfig
+from transub.translate import LLMTranslationError
 
 
 class MockLLMClient:

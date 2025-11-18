@@ -51,30 +51,18 @@ Transub 的标准流水线如下：
 
 ### 2. 安装 Transub
 
-**方案 A：使用 `pipx`（推荐）**
+使用 `uv`（推荐）
 
-`pipx` 会在隔离环境中安装命令行工具，可让 `transub` 更干净地加入你的 `PATH`。
+`uv` 是一个快速的 Python 包安装器和解析器。它会在隔离环境中安装命令行工具。
 
 ```bash
-pipx install transub
+uv tool install transub
 ```
 
 后续升级可执行：
 
 ```bash
-pipx upgrade transub
-```
-
-**方案 B：使用 `pip`**
-
-```bash
-pip install transub
-```
-
-升级方式：
-
-```bash
-pip install --upgrade transub
+uv tool upgrade transub
 ```
 
 ### 3. 安装 Whisper 后端（可选）
