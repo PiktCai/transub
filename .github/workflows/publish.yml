@@ -28,7 +28,7 @@ jobs:
       - name: Run tests
         run: |
           python -m pip install -e .
-          python -m unittest discover transub
+          python -m unittest transub.test_subtitles transub.test_translate
       
       - name: Build distributions
         run: python -m build
