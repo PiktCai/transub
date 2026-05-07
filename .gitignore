@@ -101,3 +101,7 @@ transub.conf
 *.m4p
 *.m4v
 *.m4b
+
+# Generated subtitles (output from pipeline runs)
+*.srt
+*.vtt

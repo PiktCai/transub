@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Standardized on faster-whisper**: Removed all alternative ASR backends (local/whisper, mlx, whisper.cpp, cloud API, SenseVoice, Qwen3-ASR). Transcription now uses only `faster-whisper` with word-level timestamps.
+- **Simplified WhisperConfig**: Removed `backend`, `execution_mode`, `cli_path`, `cpp_*`, `mlx_*`, `api_*`, `tune_segmentation`, `forced_aligner` fields. Config now has `model`, `device`, `language`, `word_timestamps`, and Whisper tuning parameters.
+- **Concurrent translation**: Improved error handling; failed chunks now raise `LLMTranslationError` instead of being silently skipped. Removed synchronous fallback retry path.
+- **CLI**: `WHISPER_MODEL_SUGGESTIONS` simplified from nested dict to flat list. Removed backend selection from wizard and configure commands.
+
+### Added
+- `transub prepare-model` command for pre-downloading/initializing the local ASR model.
+- Progress messages (`print(flush=True)`) for long-running CLI steps so Electron GUI can display them.
+
+### Removed
+- All non-faster-whisper ASR backends and their configuration fields.
+- `DEFAULT_OPENAI_TRANSCRIBE_URL` constant.
+- `DownloadProgressBar`, `DOWNLOAD_CONSOLE`, `_suppress_tqdm` helpers (no longer needed).
+
 ## [0.2.2] - 2025-10-27
 
 ### Added

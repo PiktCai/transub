@@ -193,6 +193,7 @@ def run(
             console.print(f"Using cached audio at [italic]{audio_path}[/]")
             logger.info("Using cached audio %s", audio_path)
         else:
+            print("Extracting audio...", flush=True)
             with console.status("Extracting audio…", spinner="dots"):
                 audio_path = extract_audio(video, config.pipeline, work_dir)
             audio_path = audio_path.resolve()
@@ -213,6 +214,7 @@ def run(
             if state.transcription_total_lines() is None:
                 state.mark_transcription(segments_path, len(source_doc.lines))
         else:
+            print("Transcribing audio...", flush=True)
             with console.status(
                 "Transcribing audio with Whisper…", spinner="dots"
             ):
@@ -229,6 +231,7 @@ def run(
             )
             if config.pipeline.timing_offset_seconds != 0:
                 refined_doc = refined_doc.apply_offset(config.pipeline.timing_offset_seconds)
+            print("Optimizing transcription...", flush=True)
             try:
                 refined_doc = optimize_subtitles(refined_doc, config.llm, config.pipeline, mode="asr")
             except Exception:
@@ -319,6 +322,7 @@ def run(
         )
 
         if free_translate:
+            print(f"Translating with {free_translate}...", flush=True)
             translated_doc = translate_document_free(
                 source_doc,
                 target_language=config.llm.target_language,
@@ -327,6 +331,7 @@ def run(
             )
             usage_stats = {"prompt": 0, "completion": 0, "total": 0}
         else:
+            print("Translating subtitles...", flush=True)
             with progress:
                 task_id = progress.add_task(
                     description=_progress_description(initial_completed),
@@ -378,6 +383,7 @@ def run(
             remove_silence=config.pipeline.remove_silence_segments,
             prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
         )
+        print("Polishing translation...", flush=True)
         try:
             output_doc = optimize_subtitles(output_doc, config.llm, config.pipeline, mode="polish")
         except Exception:

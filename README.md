@@ -229,13 +229,18 @@ TRANSUB_RUN_PERF_TESTS=1 python -m unittest transub.test_concurrent_performance 
 ```
 transub/
 ├── audio.py
+├── auth.py
 ├── batch.py
 ├── cache.py
 ├── cli.py
+├── concurrent_translate.py
 ├── config.py
 ├── free_translate.py
+├── logger.py
 ├── optimize.py
 ├── segmentation.py
+├── smart_retry.py
+├── state.py
 ├── subtitles.py
 ├── transcribe.py
 ├── translate.py

@@ -211,12 +211,22 @@ TRANSUB_RUN_PERF_TESTS=1 python -m unittest transub.test_concurrent_performance 
 ```
 transub/
 ├── audio.py           # ffmpeg 音频提取
+├── auth.py            # Provider 凭据管理
+├── batch.py           # 批量处理
+├── cache.py           # API 响应缓存
 ├── cli.py             # Typer 命令入口
+├── concurrent_translate.py  # 并发翻译
 ├── config.py          # Pydantic 配置模型
+├── free_translate.py  # 免费翻译后端 (Bing/Google)
+├── logger.py          # 日志配置
+├── optimize.py        # LLM 字幕优化
+├── segmentation.py    # NLP 智能断句
+├── smart_retry.py     # 智能重试逻辑
+├── state.py           # 流水线状态持久化
 ├── subtitles.py       # 字幕结构与排版策略
 ├── transcribe.py      # faster-whisper 转写
 ├── translate.py       # LLM 翻译批处理
-└── test_subtitles.py  # 单元测试
+└── test_*.py          # 单元测试
 ```
 
 ## 许可协议
