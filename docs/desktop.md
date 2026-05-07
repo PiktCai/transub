@@ -31,9 +31,9 @@ The GUI exposes a **Prepare local model** action on the Run page. It calls:
 uv run transub prepare-model
 ```
 
-This initializes the configured local transcription model before the user runs
-a full job. The first run may download model files; later runs use the local
-cache. The command is safe to run before any video is selected.
+This initializes the selected faster-whisper model before the user runs a full
+job. The first run may download model files; later runs use the local cache.
+The command is safe to run before any video is selected.
 
 ## Backend Bridge
 

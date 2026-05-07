@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import Card from '../components/Card'
 import { Button, Input, Select } from '../components/FormControls'
 import {
-  BACKEND_OPTIONS,
-  ENGINE_OPTIONS,
   LANGUAGES,
   PROVIDERS,
+  TRANSCRIPTION_ENGINE,
   TRANSLATION_MODES,
   WHISPER_MODELS,
 } from '../lib/constants'
@@ -20,7 +19,7 @@ type SetupTab = 'engine' | 'translate' | 'export'
 export default function SetupPage({ configPath }: Props) {
   const [activeTab, setActiveTab] = useState<SetupTab>('engine')
   const [config, setConfig] = useState<Record<string, any>>({
-    whisper: { backend: 'faster-whisper', model: 'base', language: 'auto' },
+    whisper: { model: 'base', language: 'auto', device: 'cpu', word_timestamps: true },
     llm: {
       provider: 'openai',
       model: 'gpt-5.4-mini',
@@ -58,9 +57,6 @@ export default function SetupPage({ configPath }: Props) {
     if (path) update('pipeline', 'output_dir', path)
   }
 
-  const backend = config.whisper?.backend || 'faster-whisper'
-  const selectedEngine = ENGINE_OPTIONS.find(engine => engine.value === backend) || ENGINE_OPTIONS[0]
-  const models = WHISPER_MODELS[backend] || []
   const provider = config.llm?.provider || 'openai'
   const selectedProvider = PROVIDERS.find(item => item.id === provider) || PROVIDERS[0]
   const providerModels = useMemo(() => {
@@ -98,22 +94,22 @@ export default function SetupPage({ configPath }: Props) {
           {activeTab === 'engine' && (
             <div className="form-grid">
               <Select
-                label="Transcription engine"
-                value={backend}
-                options={BACKEND_OPTIONS}
-                onChange={value => {
-                  const nextModels = WHISPER_MODELS[value] || []
-                  update('whisper', 'backend', value)
-                  update('whisper', 'model', nextModels[0] || '')
-                }}
-                helper={selectedEngine.short}
+                label="Model size"
+                value={config.whisper?.model || WHISPER_MODELS[0]}
+                options={WHISPER_MODELS.map(model => ({ value: model, label: model }))}
+                onChange={value => update('whisper', 'model', value)}
+                helper="base starts fast; large-v3-turbo is the high-quality default for longer work."
               />
               <Select
-                label="Model size"
-                value={config.whisper?.model || models[0] || ''}
-                options={models.map(model => ({ value: model, label: model }))}
-                onChange={value => update('whisper', 'model', value)}
-                helper="Model list changes with the selected engine."
+                label="Compute device"
+                value={config.whisper?.device || 'cpu'}
+                options={[
+                  { value: 'cpu', label: 'CPU' },
+                  { value: 'cuda', label: 'NVIDIA GPU / CUDA' },
+                  { value: 'auto', label: 'Auto' },
+                ]}
+                onChange={value => update('whisper', 'device', value === 'auto' ? undefined : value)}
+                helper="CPU works everywhere. CUDA is faster when available."
               />
               <Select
                 label="Source language"
@@ -122,11 +118,11 @@ export default function SetupPage({ configPath }: Props) {
                 onChange={value => update('whisper', 'language', value)}
               />
               <Input
-                label="Custom model path"
-                value={config.whisper?.model_path || ''}
-                onChange={value => update('whisper', 'model_path', value)}
-                placeholder="Optional local model file"
-                helper="Use only when a backend needs a local file path."
+                label="Initial prompt"
+                value={config.whisper?.initial_prompt || ''}
+                onChange={value => update('whisper', 'initial_prompt', value)}
+                placeholder="Optional terms, names, or style hints"
+                helper="Useful for proper nouns and recurring terminology."
               />
             </div>
           )}
@@ -223,11 +219,11 @@ export default function SetupPage({ configPath }: Props) {
           <div className="engine-list">
             <div className="engine-option is-active">
               <div className="option-head">
-                <div className="option-title">{selectedEngine.label}</div>
-                <div className="status-pill warning">{selectedEngine.short}</div>
+                <div className="option-title">{TRANSCRIPTION_ENGINE.label}</div>
+                <div className="status-pill warning">{TRANSCRIPTION_ENGINE.short}</div>
               </div>
-              <div className="option-description">{selectedEngine.description}</div>
-              {selectedEngine.install && <div className="chip">{selectedEngine.install}</div>}
+              <div className="option-description">{TRANSCRIPTION_ENGINE.description}</div>
+              <div className="chip">uv sync</div>
             </div>
 
             <div className="engine-option">
@@ -251,14 +247,27 @@ export default function SetupPage({ configPath }: Props) {
 }
 
 function normalizeLegacyConfig(config: Record<string, any>) {
+  const whisper = {
+    model: normalizeWhisperModel(config.whisper?.model),
+    device: config.whisper?.device || 'cpu',
+    language: config.whisper?.language || 'auto',
+    initial_prompt: config.whisper?.initial_prompt || '',
+    temperature: config.whisper?.temperature ?? 0,
+    compression_ratio_threshold: config.whisper?.compression_ratio_threshold ?? 2.6,
+    logprob_threshold: config.whisper?.logprob_threshold ?? -1,
+    no_speech_threshold: config.whisper?.no_speech_threshold ?? 0.3,
+    condition_on_previous_text: config.whisper?.condition_on_previous_text ?? true,
+    word_timestamps: true,
+  }
   const provider = config.llm?.provider || 'openai'
   const selectedProvider = PROVIDERS.find(item => item.id === provider)
-  if (!selectedProvider) return config
+  if (!selectedProvider) return { ...config, whisper }
 
   const legacyModels = new Set(['gpt-4o-mini', 'gpt-4.1-mini', 'moonshot-v1-8k', 'qwen-turbo'])
   if (legacyModels.has(config.llm?.model)) {
     return {
       ...config,
+      whisper,
       llm: {
         ...config.llm,
         model: selectedProvider.defaultModel,
@@ -268,5 +277,11 @@ function normalizeLegacyConfig(config: Record<string, any>) {
     }
   }
 
-  return config
+  return { ...config, whisper }
+}
+
+function normalizeWhisperModel(model: string | undefined) {
+  if (!model) return 'base'
+  if (WHISPER_MODELS.includes(model)) return model
+  return 'base'
 }

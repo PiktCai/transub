@@ -42,15 +42,13 @@ dependencies = [
     "huggingface-hub>=0.21",
     "tqdm>=4.66",
     "json-repair>=0.7.0",
+    "faster-whisper>=1.0",
 ]
 
 [project.optional-dependencies]
 async = ["aiohttp>=3.9"]
 nlp = ["spacy>=3.7"]
-faster-whisper = ["faster-whisper>=1.0"]
-funasr = ["funasr>=1.0"]
-qwen-asr = ["qwen-asr>=0.0.6,<0.1"]
-dev = ["aiohttp>=3.9", "spacy>=3.7", "faster-whisper>=1.0", "funasr>=1.0", "qwen-asr>=0.0.6,<0.1", "build", "twine"]
+dev = ["aiohttp>=3.9", "spacy>=3.7", "build", "twine"]
 
 [project.scripts]
 transub = "transub.cli:app"

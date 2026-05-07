@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
@@ -30,7 +29,6 @@ from .transcribe import (
     transcribe_audio,
     prepare_transcription_model,
     check_dependencies,
-    DEFAULT_OPENAI_TRANSCRIBE_URL,
 )
 from .translate import LLMTranslationError, translate_subtitles
 from .optimize import optimize_subtitles
@@ -44,48 +42,14 @@ THEME_HIGHLIGHT = f"bold {THEME_COLOR}"
 
 app = typer.Typer(add_completion=False, help="Transcribe and translate subtitles from videos.")
 console = Console()
-WHISPER_MODEL_SUGGESTIONS: dict[str, list[str]] = {
-    "local": [
-        "small",
-        "medium",
-        "large-v3",
-        "large-v2",
-        "base",
-        "tiny",
-    ],
-    "mlx": [
-        "mlx-community/whisper-small.en-mlx",
-        "mlx-community/whisper-medium.en-mlx",
-        "mlx-community/whisper-large-v3",
-        "mlx-community/whisper-large-v2",
-    ],
-    "api": [
-        "gpt-4o-mini-transcribe",
-        "gpt-4o-transcribe",
-        "whisper-1",
-    ],
-    "cpp": [
-        "ggml-small.en.bin",
-        "ggml-medium.en.bin",
-        "ggml-large-v3.bin",
-        "gguf-large-v3-q5_1.bin",
-    ],
-    "faster-whisper": [
-        "large-v3-turbo",
-        "large-v3",
-        "medium",
-        "small",
-        "base",
-        "tiny",
-    ],
-    "sensevoice": [
-        "FunAudioLLM/SenseVoiceSmall",
-    ],
-    "qwen3asr": [
-        "Qwen/Qwen3-ASR-0.6B",
-        "Qwen/Qwen3-ASR-1.7B",
-    ],
-}
+WHISPER_MODEL_SUGGESTIONS = [
+    "base",
+    "small",
+    "medium",
+    "large-v3-turbo",
+    "large-v3",
+    "tiny",
+]
 
 
 def _get_version() -> str:
@@ -592,7 +556,7 @@ def configure(
 
     config = manager.load()
     option_handlers = [
-        ("Whisper backend & model", _configure_whisper_backend),
+        ("Transcription model", _configure_whisper_backend),
         ("Whisper advanced parameters", _configure_whisper_advanced),
         ("Translation LLM", _configure_llm),
         ("Pipeline & output", _configure_pipeline),
@@ -860,26 +824,12 @@ def _wizard_ask_json_dict(
         return parsed
 
 
-def _wizard_step_whisper_backend(config: TransubConfig) -> None:
-    choices = ["local", "api", "cpp", "mlx", "faster-whisper", "sensevoice", "qwen3asr"]
-    backend = _wizard_ask_choice(
-        "Select backend",
-        choices,
-        config.whisper.backend,
-    )
-    config.whisper.backend = backend
-
-
 def _wizard_step_whisper_model(config: TransubConfig) -> None:
-    suggestions = WHISPER_MODEL_SUGGESTIONS.get(config.whisper.backend, [])
-    default_model = config.whisper.model or (suggestions[0] if suggestions else "base")
-    model = _wizard_ask_text(
-        "Model ID or path",
-        default=default_model,
-        allow_blank=False,
+    config.whisper.model = _wizard_ask_choice(
+        "Model size",
+        WHISPER_MODEL_SUGGESTIONS,
+        config.whisper.model or "base",
     )
-    assert model
-    config.whisper.model = model
 
 
 def _wizard_step_whisper_device(config: TransubConfig) -> None:
@@ -901,9 +851,9 @@ def _wizard_step_whisper_language(config: TransubConfig) -> None:
 
 
 def _wizard_step_whisper_segmentation(config: TransubConfig) -> None:
-    config.whisper.tune_segmentation = _wizard_ask_bool(
-        "Enable segmentation tuning?",
-        config.whisper.tune_segmentation,
+    config.whisper.word_timestamps = _wizard_ask_bool(
+        "Keep word-level timestamps enabled?",
+        True,
     )
 
 
@@ -914,68 +864,6 @@ def _wizard_step_whisper_initial_prompt(config: TransubConfig) -> None:
         to_none=True,
     )
     config.whisper.initial_prompt = initial_prompt
-
-
-def _wizard_step_whisper_api(config: TransubConfig) -> None:
-    default_url = config.whisper.api_url or DEFAULT_OPENAI_TRANSCRIBE_URL
-    api_url = _wizard_ask_text(
-        "API URL",
-        default=default_url,
-        allow_blank=False,
-    )
-    api_key_env = _wizard_ask_text(
-        "API key environment variable",
-        default=config.whisper.api_key_env,
-        allow_blank=False,
-    )
-    config.whisper.api_url = api_url
-    config.whisper.api_key_env = api_key_env
-
-
-def _wizard_step_whisper_cpp(config: TransubConfig) -> None:
-    config.whisper.cpp_binary = _wizard_ask_text(
-        "whisper.cpp executable",
-        default=config.whisper.cpp_binary,
-        allow_blank=False,
-    )
-    config.whisper.cpp_model_path = _wizard_ask_text(
-        "Model file path (.bin/.gguf)",
-        default=config.whisper.cpp_model_path or "",
-        allow_blank=False,
-    )
-    config.whisper.cpp_threads = _wizard_ask_optional_int(
-        "Thread count",
-        current=config.whisper.cpp_threads,
-        minimum=1,
-    )
-    extra_args = _wizard_ask_text(
-        "Additional arguments (space separated)",
-        default=" ".join(config.whisper.cpp_extra_args) if config.whisper.cpp_extra_args else "",
-    )
-    config.whisper.cpp_extra_args = shlex.split(extra_args) if extra_args else []
-
-
-def _wizard_step_whisper_mlx(config: TransubConfig) -> None:
-    config.whisper.mlx_model_dir = _wizard_ask_text(
-        "Model directory",
-        default=config.whisper.mlx_model_dir or "",
-        to_none=True,
-    )
-    config.whisper.mlx_dtype = _wizard_ask_text(
-        "dtype (auto/float16/float32)",
-        default=config.whisper.mlx_dtype or "",
-        to_none=True,
-    )
-    config.whisper.mlx_device = _wizard_ask_text(
-        "Device (auto/mps/cpu)",
-        default=config.whisper.mlx_device or "",
-        to_none=True,
-    )
-    extra_args = _wizard_ask_json_dict(
-        "Extra arguments",
-        default=config.whisper.mlx_extra_args or {},
-    )
-    config.whisper.mlx_extra_args = extra_args
 
 
 def _wizard_step_llm_provider(config: TransubConfig) -> None:
@@ -1074,19 +962,9 @@ def _prompt_for_config() -> TransubConfig:
     config = TransubConfig()
     steps: List[WizardStep] = [
         WizardStep(
-            "whisper-backend",
-            "Whisper Backend",
-            lambda _cfg: "Choose where Whisper will run.",
-            _wizard_step_whisper_backend,
-        ),
-        WizardStep(
             "whisper-model",
-            "Whisper Model",
-            lambda cfg: (
-                "Suggested models: " + ", ".join(WHISPER_MODEL_SUGGESTIONS.get(cfg.whisper.backend, []))
-            )
-            if WHISPER_MODEL_SUGGESTIONS.get(cfg.whisper.backend)
-            else "Provide the model identifier or path.",
+            "Transcription Model",
+            lambda _cfg: "Transub uses faster-whisper only. Pick speed vs accuracy.",
             _wizard_step_whisper_model,
         ),
         WizardStep(
@@ -1103,8 +981,8 @@ def _prompt_for_config() -> TransubConfig:
         ),
         WizardStep(
             "whisper-tune",
-            "Segmentation Tuning",
-            lambda _cfg: "Enable this to reduce fragmented subtitles.",
+            "Word Timestamps",
+            lambda _cfg: "Keep this on for accurate subtitle timing.",
             _wizard_step_whisper_segmentation,
         ),
         WizardStep(
@@ -1112,27 +990,6 @@ def _prompt_for_config() -> TransubConfig:
             "Initial Prompt",
             lambda _cfg: "Optional text to help Whisper with terminology or role-playing.",
             _wizard_step_whisper_initial_prompt,
-        ),
-        WizardStep(
-            "whisper-api",
-            "Whisper API",
-            lambda _cfg: "Configure your remote transcription endpoint.",
-            _wizard_step_whisper_api,
-            lambda cfg: cfg.whisper.backend == "api",
-        ),
-        WizardStep(
-            "whisper-cpp",
-            "whisper.cpp Options",
-            lambda _cfg: "Specify the executable, model path, and extra parameters.",
-            _wizard_step_whisper_cpp,
-            lambda cfg: cfg.whisper.backend == "cpp",
-        ),
-        WizardStep(
-            "whisper-mlx",
-            "mlx-whisper Options",
-            lambda _cfg: "Provide optional model directory and advanced arguments.",
-            _wizard_step_whisper_mlx,
-            lambda cfg: cfg.whisper.backend == "mlx",
         ),
         WizardStep(
             "llm-provider",
@@ -1238,7 +1095,7 @@ def _config_summary_table(config: TransubConfig, path: Path) -> Table:
         (
             "whisper",
             (
-                f"backend={whisper.backend} | model={whisper.model} | "
+                f"engine=faster-whisper | model={whisper.model} | "
                 f"device={whisper.device or 'auto'} | language={whisper.language or 'auto'}"
             ),
         ),
@@ -1268,38 +1125,19 @@ def _configure_whisper_backend(config: TransubConfig) -> None:
     while True:
         console.clear()
         summary_lines = [
-            f"Backend: {whisper.backend}",
+            "Engine: faster-whisper",
             f"Model: {whisper.model}",
             f"Device: {whisper.device or 'auto'} | Language: {whisper.language or 'auto'}",
         ]
-        if whisper.backend == "api":
-            summary_lines.append(
-                f"API url: {whisper.api_url or '(default)'} | key env: {whisper.api_key_env}"
-            )
-        elif whisper.backend == "cpp":
-            summary_lines.append(
-                f"cpp_binary: {whisper.cpp_binary} | model_path: {whisper.cpp_model_path or '(none)'} | threads: {whisper.cpp_threads or 'auto'}"
-            )
-        elif whisper.backend == "mlx":
-            summary_lines.append(
-                f"mlx_model_dir: {whisper.mlx_model_dir or '(auto)'} | dtype: {whisper.mlx_dtype or 'auto'} | device: {whisper.mlx_device or 'auto'}"
-            )
         console.print(
-            Panel("\\n".join(summary_lines), title="Whisper backend & model", border_style=THEME_COLOR)
+            Panel("\\n".join(summary_lines), title="Transcription model", border_style=THEME_COLOR)
         )
 
         options = [
-            ("Change backend", "backend"),
             ("Change model", "model"),
             ("Change device", "device"),
             ("Change language", "language"),
         ]
-        if whisper.backend == "api":
-            options.append(("Set API settings", "api"))
-        if whisper.backend == "cpp":
-            options.append(("Set whisper.cpp options", "cpp"))
-        if whisper.backend == "mlx":
-            options.append(("Set mlx options", "mlx"))
 
         console.print("0. Back")
         for idx, (label, _) in enumerate(options, start=1):
@@ -1313,30 +1151,11 @@ def _configure_whisper_backend(config: TransubConfig) -> None:
             _wait_for_enter("Selection out of range. Press Enter to continue...")
             continue
 
-        if key == "backend":
-            new_backend = Prompt.ask(
-                "Backend",
-                choices=["local", "api", "cpp", "mlx", "faster-whisper", "sensevoice", "qwen3asr"],
-                default=whisper.backend,
-            )
-            if new_backend != whisper.backend:
-                whisper.backend = new_backend
-                suggestions = WHISPER_MODEL_SUGGESTIONS.get(new_backend, [])
-                if suggestions and Confirm.ask(
-                    f"Use suggested model '{suggestions[0]}'?",
-                    default=True,
-                ):
-                    whisper.model = suggestions[0]
-            continue
-
         if key == "model":
-            suggestions = WHISPER_MODEL_SUGGESTIONS.get(whisper.backend, [])
-            if suggestions:
-                console.print("Suggested models: " + ", ".join(suggestions))
             whisper.model = Prompt.ask(
-                "Model id or path",
+                "Model size",
+                choices=WHISPER_MODEL_SUGGESTIONS,
                 default=whisper.model,
-                show_choices=False,
             )
         elif key == "device":
             whisper.device = (
@@ -1356,79 +1175,6 @@ def _configure_whisper_backend(config: TransubConfig) -> None:
                 )
                 or None
             )
-        elif key == "api":
-            whisper.api_url = (
-                Prompt.ask(
-                    "API URL (blank for default)",
-                    default=whisper.api_url or "https://api.openai.com/v1/audio/transcriptions",
-                    show_choices=False,
-                )
-                or None
-            )
-            whisper.api_key_env = Prompt.ask(
-                "API key environment variable",
-                default=whisper.api_key_env,
-            )
-        elif key == "cpp":
-            whisper.cpp_binary = Prompt.ask(
-                "whisper.cpp executable",
-                default=whisper.cpp_binary,
-                show_choices=False,
-            )
-            whisper.cpp_model_path = (
-                Prompt.ask(
-                    "whisper.cpp model path (.bin/.gguf) (blank to clear)",
-                    default=whisper.cpp_model_path or "",
-                    show_choices=False,
-                )
-                or None
-            )
-            threads_raw = Prompt.ask(
-                "whisper.cpp threads (blank for auto)",
-                default=str(whisper.cpp_threads or ""),
-                show_choices=False,
-            ).strip()
-            whisper.cpp_threads = int(threads_raw) if threads_raw else None
-            extra_args_raw = Prompt.ask(
-                "Extra whisper.cpp arguments (space separated)",
-                default=" ".join(whisper.cpp_extra_args),
-                show_choices=False,
-            ).strip()
-            whisper.cpp_extra_args = shlex.split(extra_args_raw) if extra_args_raw else []
-        elif key == "mlx":
-            whisper.mlx_model_dir = (
-                Prompt.ask(
-                    "mlx-whisper model directory (blank for auto)",
-                    default=whisper.mlx_model_dir or "",
-                    show_choices=False,
-                )
-                or None
-            )
-            whisper.mlx_dtype = (
-                Prompt.ask(
-                    "mlx dtype (auto/float16/float32)",
-                    default=whisper.mlx_dtype or "",
-                    show_choices=False,
-                )
-                or None
-            )
-            whisper.mlx_device = (
-                Prompt.ask(
-                    "mlx device (auto/mps/cpu)",
-                    default=whisper.mlx_device or "",
-                    show_choices=False,
-                )
-                or None
-            )
-            extra_json = Prompt.ask(
-                "Extra mlx-whisper arguments (JSON)",
-                default=json.dumps(whisper.mlx_extra_args or {}),
-                show_choices=False,
-            )
-            try:
-                whisper.mlx_extra_args = json.loads(extra_json) if extra_json.strip() else {}
-            except json.JSONDecodeError:
-                _wait_for_enter("Invalid JSON. Press Enter to continue...")
 
 
 def _configure_whisper_advanced(config: TransubConfig) -> None:
@@ -1436,7 +1182,7 @@ def _configure_whisper_advanced(config: TransubConfig) -> None:
     while True:
         console.clear()
         summary_lines = [
-            f"Segmentation tuning: {_fmt_bool(whisper.tune_segmentation)} | Temperature: {whisper.temperature if whisper.temperature is not None else 'auto'} | Compression ratio: {whisper.compression_ratio_threshold}",
+            f"Word timestamps: {_fmt_bool(whisper.word_timestamps)} | Temperature: {whisper.temperature if whisper.temperature is not None else 'auto'} | Compression ratio: {whisper.compression_ratio_threshold}",
             f"Logprob threshold: {whisper.logprob_threshold} | No-speech threshold: {whisper.no_speech_threshold}",
             f"Condition on previous text: {_fmt_bool(bool(whisper.condition_on_previous_text))} | Initial prompt: {whisper.initial_prompt or '(none)'}",
         ]
@@ -1445,7 +1191,7 @@ def _configure_whisper_advanced(config: TransubConfig) -> None:
         )
 
         options = [
-            ("Toggle segmentation tuning", "seg"),
+            ("Toggle word timestamps", "timestamps"),
             ("Set temperature", "temp"),
             ("Set compression ratio threshold", "comp"),
             ("Set logprob threshold", "logprob"),
@@ -1465,8 +1211,8 @@ def _configure_whisper_advanced(config: TransubConfig) -> None:
             _wait_for_enter("Selection out of range. Press Enter to continue...")
             continue
 
-        if key == "seg":
-            whisper.tune_segmentation = not whisper.tune_segmentation
+        if key == "timestamps":
+            whisper.word_timestamps = not whisper.word_timestamps
         elif key == "temp":
             whisper.temperature = _prompt_float_optional(
                 "Temperature (blank to keep, 'none' to clear)", whisper.temperature

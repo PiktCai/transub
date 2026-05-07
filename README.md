@@ -11,7 +11,7 @@ Turn any **video** into ready-to-share subtitles. Transub extracts audio with `f
 - [Installation](#installation)
   - [1. Prerequisites](#1-prerequisites)
   - [2. Install Transub](#2-install-transub)
-  - [3. Install a Whisper Backend](#3-install-a-whisper-backend)
+  - [3. Transcription Engine](#3-transcription-engine)
   - [4. Configure Transub](#4-configure-transub)
   - [5. Run the Pipeline](#5-run-the-pipeline)
 - [Configuration Overview](#configuration-overview)
@@ -25,7 +25,7 @@ Turn any **video** into ready-to-share subtitles. Transub extracts audio with `f
 Transub orchestrates a reproducible pipeline:
 
 1. Extract audio from a video with `ffmpeg`.
-2. Transcribe speech via Whisper (local, mlx, whisper.cpp, or API).
+2. Transcribe speech locally with `faster-whisper`.
 3. Translate subtitle batches with JSON-constrained prompts.
 4. Emit `.srt` or `.vtt` files with tuned line breaks and timing.
 
@@ -35,7 +35,7 @@ Intermediate state is cached so interrupted runs can resume without repeating ea
 
 - **End-to-end pipeline** — `transub run <video.mp4>` handles extraction → transcription → translation → export.
 - **Desktop GUI** — Electron + React app in `desktop/` for visual configuration and monitoring.
-- **Multiple transcription backends** — choose local Whisper, `mlx-whisper`, `whisper.cpp`, OpenAI-compatible APIs, or new backends (faster-whisper, SenseVoice, Qwen3-ASR).
+- **Opinionated transcription** — one ASR engine: `faster-whisper`, with word timestamps enabled for subtitle timing.
 - **Intelligent segmentation** — NLP-based subtitle splitting using dependency parsing for natural sentence boundaries.
 - **LLM subtitle optimization** — ASR error correction and translation polishing using LLM agent loop.
 - **Free translation backends** — cost-free translation using Bing/Google APIs (`--free bing` or `--free google`).
@@ -73,53 +73,18 @@ To update later, run:
 uv tool upgrade transub
 ```
 
-### 3. Install a Whisper Backend (Optional)
+### 3. Transcription Engine
 
-`transub` supports multiple transcription backends. Choose one based on your needs:
+Transub intentionally uses one transcription engine: **faster-whisper**.
 
-- **Cloud API (Recommended for quick start):**
-  - Uses OpenAI's Whisper API or compatible endpoints
-  - No local installation required
-  - Set `OPENAI_API_KEY` environment variable
-  - Configure with `backend = "api"` during setup
+This keeps the product path simple and preserves the timing data subtitle work
+depends on. No speech API keys, `whisper.cpp` model files, MLX conversion, or
+alternate ASR packages are needed. In source checkouts, install dependencies
+with:
 
-- **faster-whisper (Recommended for local use):**
-  - 4x faster than standard Whisper with same accuracy
-  - Supports word-level timestamps
-  - CPU support with INT8 quantization
-  ```bash
-  uv sync --extra faster-whisper
-  ```
-
-- **SenseVoice (Best for Chinese/Japanese/Korean):**
-  - Extremely fast (15x faster than Whisper)
-  - Optimized for Chinese, English, Cantonese, Japanese, Korean
-  - No word-level timestamps (segment-level only)
-  ```bash
-  uv sync --extra funasr
-  ```
-
-- **Qwen3-ASR (Best multilingual coverage):**
-  - 52 languages and dialects
-  - Apache 2.0 license
-  - Requires GPU for official package
-  ```bash
-  uv sync --extra qwen-asr
-  ```
-
-- **Local backends (for offline use or custom models):**
-  - **For most users (local, CPU/GPU):**
-    ```bash
-    uv add openai-whisper
-    ```
-  
-  - **For Apple Silicon (macOS):**
-    ```bash
-    uv add mlx-whisper
-    ```
-  
-  - **For `whisper.cpp`:**
-    Follow the [whisper.cpp installation instructions](https://github.com/ggerganov/whisper.cpp) to build the `main` executable and make it available on your `PATH`.
+```bash
+uv sync
+```
 
 ### 4. Configure Transub
 
@@ -129,9 +94,7 @@ Run the interactive setup wizard to create your configuration file.
 transub init
 ```
 
-The wizard will guide you through selecting the backend, model, and LLM provider for translation.
-
-**Note on API Keys:** If you use OpenAI for both transcription (Whisper API) and translation (GPT models), they share the same `OPENAI_API_KEY` by default. If you need separate keys for different services, you can customize `api_key_env` in the config file for each service.
+The wizard will guide you through selecting the faster-whisper model size and the LLM provider for translation.
 
 ### 5. Run the Pipeline
 
@@ -153,7 +116,7 @@ This downloads or initializes the configured local ASR model and reuses the cach
 
 Runtime settings live in `transub.conf` (TOML). Key sections:
 
-- `[whisper]` — backend selection, model name, device overrides, and extra arguments.
+- `[whisper]` — faster-whisper model size, device, source language, and timestamp options.
 - `[llm]` — translation provider/model, temperature, batch size, retry policy, and context window size.
 - `[pipeline]` — output format, line-length targets, timing trim/offset, punctuation and spacing options, and glossary path.
 
@@ -182,7 +145,7 @@ transub run demo.mp4 --free bing              # use free Bing translator instead
 transub run demo.mp4 --free google            # use free Google translator instead of LLM
 transub batch tasks.csv                       # process multiple videos from CSV file
 transub prepare-model                         # download/initialize configured local ASR model
-transub show_config
+transub show-config
 transub init --config ./transub.conf   # rerun the setup wizard
 transub configure                      # edit config (0 saves, Q discards)
 transub run demo.mp4 --transcribe-only # export raw transcription only
@@ -237,9 +200,10 @@ Credential handling in the Python backend:
     ```bash
     uv sync --extra async
     ```
-4.  **Install a Whisper backend for testing:**
+4.  **Prepare the local transcription engine:**
     ```bash
-    uv add openai-whisper
+    uv sync
+    uv run transub prepare-model
     ```
 
 ### Running Tests

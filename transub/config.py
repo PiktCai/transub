@@ -48,76 +48,20 @@ DEFAULT_TRANSLATION_PROMPT = dedent(
 
 
 class WhisperConfig(BaseModel):
-    """Configuration for Whisper transcription."""
+    """Configuration for faster-whisper transcription."""
 
-    backend: str = Field(
-        default="local", description="Which backend to use: local, api, cpp, mlx, faster-whisper, sensevoice, or qwen3asr"
-    )
-    execution_mode: str = Field(
-        default="internal",
-        description="Execution strategy: 'internal' (python import) or 'external' (cli subprocess)",
-    )
-    cli_path: str | None = Field(
-        default=None,
-        description="Path to the CLI executable for 'external' mode",
-    )
-    model: str = Field(default="base", description="Whisper model size")
+    model: str = Field(default="base", description="faster-whisper model size")
     device: str | None = Field(
-        default=None,
-        description="Override compute device, e.g. cuda, cpu, mps",
-    )
-    api_url: str | None = Field(
-        default=None,
-        description="Custom transcription API endpoint when backend=api",
-    )
-    api_key_env: str = Field(
-        default="OPENAI_API_KEY",
-        description="Environment variable storing the speech-to-text API key",
-    )
-    cpp_binary: str = Field(
-        default="whisper-cpp",
-        description="Executable name or path for the whisper.cpp CLI",
-    )
-    cpp_model_path: str | None = Field(
-        default=None,
-        description="Path to the ggml/gguf model file when using whisper.cpp backend",
-    )
-    cpp_threads: int | None = Field(
-        default=None,
-        description="Optional number of threads for whisper.cpp",
-        ge=1,
-    )
-    cpp_extra_args: list[str] = Field(
-        default_factory=list,
-        description="Additional CLI arguments for whisper.cpp backend",
-    )
-    mlx_model_dir: str | None = Field(
-        default=None,
-        description="Directory containing mlx-whisper converted model weights",
-    )
-    mlx_dtype: str | None = Field(
-        default=None,
-        description="Computation dtype for mlx-whisper (auto, float16, float32, etc.)",
-    )
-    mlx_device: str | None = Field(
-        default=None,
-        description="Target device for mlx-whisper (cpu, mps). Defaults to mlx auto detect.",
-    )
-    mlx_extra_args: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional keyword arguments forwarded to mlx-whisper",
+        default="cpu",
+        description="Compute device for faster-whisper, usually cpu or cuda",
     )
     language: str | None = Field(
-        default="en",
-        description="Language hint passed to Whisper when transcribing",
+        default="auto",
+        description="Language hint passed to faster-whisper; use auto for detection",
     )
     extra_args: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional backend-specific arguments",
-    )
-    tune_segmentation: bool = Field(
-        default=True,
-        description="Apply recommended Whisper segmentation parameters to reduce fragmenting.",
+        description="Advanced faster-whisper transcribe() keyword arguments",
     )
     temperature: float | None = Field(
         default=0.0,
@@ -150,21 +94,19 @@ class WhisperConfig(BaseModel):
     )
     word_timestamps: bool = Field(
         default=True,
-        description="Extract word-level timestamps for more accurate subtitle timing (strongly recommended).",
-    )
-    forced_aligner: str | None = Field(
-        default=None,
-        description="Forced aligner model for Qwen3-ASR timestamps, e.g. 'Qwen/Qwen3-ForcedAligner-0.6B'.",
+        description="Extract word-level timestamps for accurate subtitle timing.",
     )
 
     @model_validator(mode="after")
-    def validate_backend(self) -> "WhisperConfig":
-        backend = self.backend.lower()
-        if backend not in {"local", "api", "cpp", "mlx", "faster-whisper", "sensevoice", "qwen3asr"}:
-            raise ValueError("backend must be 'local', 'api', 'cpp', 'mlx', 'faster-whisper', 'sensevoice', or 'qwen3asr'")
-        object.__setattr__(self, "backend", backend)
-        if backend == "cpp" and not self.cpp_model_path:
-            raise ValueError("cpp_model_path must be set when backend is 'cpp'")
+    def validate_model(self) -> "WhisperConfig":
+        model = self.model.strip()
+        if not model:
+            raise ValueError("model must not be blank")
+        object.__setattr__(self, "model", model)
+        if self.language == "":
+            object.__setattr__(self, "language", "auto")
+        if not self.word_timestamps:
+            object.__setattr__(self, "word_timestamps", True)
         return self
 
 
