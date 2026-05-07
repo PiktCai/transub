@@ -1,0 +1,407 @@
+"""
+HTTP backend for the transub desktop application.
+
+Exposes the Python pipeline over localhost HTTP + SSE so the Electron
+frontend can call it without spawning CLI subprocesses.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import sys
+import threading
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+
+from .auth import AuthManager
+from .cache import clear_cache, get_cache_stats
+from .config import ConfigManager, TransubConfig
+from .free_translate import translate_document_free
+from .optimize import optimize_subtitles
+from .state import PipelineState, load_translation_progress, persist_translation_progress
+from .subtitles import SubtitleDocument
+from .transcribe import TranscriptionError, check_dependencies, prepare_transcription_model, transcribe_audio
+from .translate import LLMTranslationError, translate_subtitles
+
+logger = logging.getLogger("transub.server")
+
+app = FastAPI(title="Transub", version="0.3.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+_sse_subscribers: list[asyncio.Queue] = []
+_active_pipeline: Optional[threading.Thread] = None
+_pipeline_cancelled = False
+
+
+async def _broadcast(event: str, data: dict) -> None:
+    for q in _sse_subscribers:
+        await q.put({"event": event, "data": data})
+
+
+def _sync_broadcast(event: str, data: dict) -> None:
+    loop = None
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        pass
+    if loop and loop.is_running():
+        loop.create_task(_broadcast(event, data))
+
+
+def _get_config(config_path: Optional[str] = None) -> TransubConfig:
+    manager = ConfigManager(config_path or ConfigManager.default_path())
+    if manager.exists():
+        return manager.load()
+    return TransubConfig()
+
+
+def _get_auth_manager() -> AuthManager:
+    return AuthManager()
+
+
+class RunRequest(BaseModel):
+    video_path: str
+    transcribe_only: bool = False
+    config_path: Optional[str] = None
+    work_dir: Optional[str] = None
+
+
+class ConfigUpdate(BaseModel):
+    config: dict
+    config_path: Optional[str] = None
+
+
+class AuthUpdate(BaseModel):
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+
+
+class PrepareModelRequest(BaseModel):
+    config_path: Optional[str] = None
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "version": "0.3.0"}
+
+
+@app.get("/api/config")
+async def get_config(config_path: Optional[str] = None):
+    config = _get_config(config_path)
+    return config.model_dump(mode="json")
+
+
+@app.put("/api/config")
+async def update_config(body: ConfigUpdate):
+    manager = ConfigManager(body.config_path or ConfigManager.default_path())
+    try:
+        config = TransubConfig.model_validate(body.config)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    manager.save(config)
+    return {"status": "ok"}
+
+
+@app.get("/api/auth")
+async def get_auth():
+    manager = _get_auth_manager()
+    all_auth = manager.load_all()
+    result = {}
+    for provider, data in all_auth.items():
+        if isinstance(data, dict):
+            result[provider] = {
+                "has_key": bool(data.get("api_key")),
+                "api_base": data.get("api_base", ""),
+            }
+    return result
+
+
+@app.put("/api/auth/{provider}")
+async def save_auth(provider: str, body: AuthUpdate):
+    manager = _get_auth_manager()
+    manager.save_provider(provider, api_key=body.api_key, api_base=body.api_base)
+    return {"status": "ok"}
+
+
+@app.delete("/api/auth/{provider}")
+async def delete_auth(provider: str):
+    manager = _get_auth_manager()
+    manager.save_provider(provider, api_key="", api_base="")
+    return {"status": "ok"}
+
+
+@app.post("/api/prepare-model")
+async def prepare_model(body: PrepareModelRequest):
+    config = _get_config(body.config_path)
+    try:
+        check_dependencies(config.whisper)
+        message = prepare_transcription_model(config.whisper)
+        return {"status": "ok", "message": message}
+    except TranscriptionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/run")
+async def run_pipeline(body: RunRequest):
+    global _active_pipeline, _pipeline_cancelled
+    _pipeline_cancelled = False
+
+    video = Path(body.video_path)
+    if not video.exists():
+        raise HTTPException(status_code=400, detail=f"Video not found: {body.video_path}")
+
+    config = _get_config(body.config_path)
+    work_dir = Path(body.work_dir) if body.work_dir else Path.home() / ".cache" / "transub"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    thread = threading.Thread(
+        target=_run_pipeline_thread,
+        args=(video, config, work_dir, body.transcribe_only),
+        daemon=True,
+    )
+    _active_pipeline = thread
+    thread.start()
+
+    return {"status": "started", "video": str(video)}
+
+
+@app.post("/api/cancel")
+async def cancel_pipeline():
+    global _pipeline_cancelled
+    _pipeline_cancelled = True
+    return {"status": "cancelling"}
+
+
+@app.get("/api/stream")
+async def stream():
+    queue: asyncio.Queue = asyncio.Queue()
+    _sse_subscribers.append(queue)
+
+    async def generate():
+        try:
+            while True:
+                data = await queue.get()
+                yield f"event: {data['event']}\ndata: {json.dumps(data['data'])}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if queue in _sse_subscribers:
+                _sse_subscribers.remove(queue)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.get("/api/cache/stats")
+async def cache_stats():
+    return get_cache_stats()
+
+
+@app.delete("/api/cache")
+async def clear_cache_endpoint():
+    count = clear_cache()
+    return {"cleared": count}
+
+
+def _run_pipeline_thread(
+    video: Path,
+    config: TransubConfig,
+    work_dir: Path,
+    transcribe_only: bool,
+) -> None:
+    global _pipeline_cancelled
+
+    def emit(event: str, data: dict) -> None:
+        _sync_broadcast(event, data)
+
+    def check_cancelled() -> bool:
+        return _pipeline_cancelled
+
+    try:
+        state_path = work_dir / f"{video.stem}_state.json"
+        state = PipelineState.load(state_path, video)
+
+        audio_path = state.get_audio_path()
+        segments_path = state.get_segments_path()
+
+        if check_cancelled():
+            emit("done", {"success": False, "error": "Cancelled"})
+            return
+
+        if not (audio_path and audio_path.exists()):
+            emit("progress", {"stage": "extracting", "message": "Extracting audio..."})
+            from .audio import extract_audio
+            audio_path = extract_audio(video, config.pipeline, work_dir)
+            audio_path = audio_path.resolve()
+            state.set_audio_path(audio_path)
+            emit("progress", {"stage": "extracting", "message": "Audio extracted."})
+
+        if check_cancelled():
+            emit("done", {"success": False, "error": "Cancelled"})
+            return
+
+        if segments_path and segments_path.exists():
+            with segments_path.open("r", encoding="utf-8") as fh:
+                segment_payload = json.load(fh)
+            source_doc = SubtitleDocument.from_serialized(segment_payload)
+            emit("progress", {"stage": "transcribing", "message": "Loaded cached transcription."})
+        else:
+            emit("progress", {"stage": "transcribing", "message": "Transcribing audio..."})
+            raw_doc = transcribe_audio(audio_path, config.whisper)
+
+            if check_cancelled():
+                emit("done", {"success": False, "error": "Cancelled"})
+                return
+
+            refined_doc = raw_doc.refine(
+                max_width=config.pipeline.max_display_width,
+                min_width=config.pipeline.min_display_width,
+                min_duration=config.pipeline.min_line_duration,
+                max_cps=config.pipeline.max_cps,
+                pause_threshold=config.pipeline.pause_threshold_seconds,
+                silence_threshold=config.pipeline.silence_threshold_seconds,
+                remove_silence=config.pipeline.remove_silence_segments,
+                prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
+            )
+            if config.pipeline.timing_offset_seconds != 0:
+                refined_doc = refined_doc.apply_offset(config.pipeline.timing_offset_seconds)
+
+            emit("progress", {"stage": "optimizing", "message": "Optimizing transcription..."})
+            try:
+                refined_doc = optimize_subtitles(refined_doc, config.llm, config.pipeline, mode="asr")
+            except Exception:
+                pass
+
+            segments_path = work_dir / f"{video.stem}_segments.json"
+            segments_path.write_text(
+                json.dumps(refined_doc.to_serializable(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            state.mark_transcription(segments_path, len(refined_doc.lines))
+            source_doc = refined_doc
+            emit("progress", {"stage": "transcribing", "message": f"Transcription complete ({len(refined_doc.lines)} lines)."})
+
+        output_dir = (
+            Path(config.pipeline.output_dir)
+            if config.pipeline.output_dir is not None
+            else video.parent
+        )
+
+        if transcribe_only:
+            source_suffix = _source_language_suffix(config.whisper.language)
+            transcript_path = _write_document(source_doc, output_dir, video.stem, source_suffix, config.pipeline.output_format)
+            emit("done", {"success": True, "output_path": str(transcript_path), "lines": len(source_doc.lines)})
+            return
+
+        if check_cancelled():
+            emit("done", {"success": False, "error": "Cancelled"})
+            return
+
+        translations_path = state.translation_progress_path(work_dir / f"{video.stem}_translations.json")
+        existing_translations = load_translation_progress(translations_path)
+
+        def handle_progress(new_items: Dict[str, str]) -> None:
+            existing_translations.update(new_items)
+            persist_translation_progress(translations_path, existing_translations)
+            state.mark_lines_completed(new_items.keys())
+            emit("progress", {
+                "stage": "translating",
+                "message": f"Translated {len(existing_translations)}/{len(source_doc.lines)} lines.",
+                "done": len(existing_translations),
+                "total": len(source_doc.lines),
+            })
+
+        emit("progress", {"stage": "translating", "message": "Translating subtitles..."})
+        translated_doc, usage_stats = translate_subtitles(
+            source_doc, config.llm, config.pipeline,
+            existing_translations=existing_translations,
+            progress_callback=handle_progress,
+        )
+
+        if check_cancelled():
+            emit("done", {"success": False, "error": "Cancelled"})
+            return
+
+        emit("progress", {"stage": "polishing", "message": "Polishing translation..."})
+        output_doc = translated_doc.refine(
+            max_width=config.pipeline.translation_max_display_width or 30.0,
+            min_width=config.pipeline.translation_min_display_width or 15.0,
+            min_duration=config.pipeline.min_line_duration,
+            max_cps=config.pipeline.max_cps,
+            pause_threshold=config.pipeline.pause_threshold_seconds,
+            silence_threshold=config.pipeline.silence_threshold_seconds,
+            remove_silence=config.pipeline.remove_silence_segments,
+            prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
+        )
+
+        try:
+            output_doc = optimize_subtitles(output_doc, config.llm, config.pipeline, mode="polish")
+        except Exception:
+            pass
+
+        if config.pipeline.remove_trailing_punctuation:
+            output_doc = output_doc.remove_trailing_punctuation()
+        if config.pipeline.normalize_cjk_spacing:
+            output_doc = output_doc.normalize_cjk_spacing()
+
+        output_suffix = _language_suffix(config.llm.target_language)
+        output_path = _write_document(output_doc, output_dir, video.stem, output_suffix, config.pipeline.output_format)
+
+        if config.pipeline.save_source_subtitles:
+            source_suffix = _source_language_suffix(config.whisper.language)
+            _write_document(source_doc, output_dir, video.stem, source_suffix, config.pipeline.output_format)
+
+        state.clear()
+        emit("done", {
+            "success": True,
+            "output_path": str(output_path),
+            "lines": len(output_doc.lines),
+            "tokens": usage_stats,
+        })
+
+    except Exception as e:
+        logger.exception("Pipeline failed")
+        emit("done", {"success": False, "error": str(e)})
+
+
+def _write_document(document: SubtitleDocument, target_dir: Path, stem: str, suffix: str, fmt: str) -> Path:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = target_dir / f"{stem}{suffix}.{fmt}"
+    content = document.to_srt() if fmt == "srt" else document.to_vtt()
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _source_language_suffix(language: Optional[str]) -> str:
+    if not language or language == "auto":
+        return ".src"
+    return f".{language}"
+
+
+def _language_suffix(language: str) -> str:
+    if not language or language == "auto":
+        return ""
+    return f".{language}"
+
+
+def start_server(host: str = "127.0.0.1", port: int = 18789) -> None:
+    import uvicorn
+    logger.info("Starting Transub server on %s:%d", host, port)
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+if __name__ == "__main__":
+    start_server()

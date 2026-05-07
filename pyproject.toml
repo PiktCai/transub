@@ -48,7 +48,8 @@ dependencies = [
 [project.optional-dependencies]
 async = ["aiohttp>=3.9"]
 nlp = ["spacy>=3.7"]
-dev = ["aiohttp>=3.9", "spacy>=3.7", "build", "twine"]
+server = ["fastapi>=0.115", "uvicorn[standard]>=0.32"]
+dev = ["aiohttp>=3.9", "spacy>=3.7", "fastapi>=0.115", "uvicorn[standard]>=0.32", "build", "twine"]
 
 [project.scripts]
 transub = "transub.cli:app"

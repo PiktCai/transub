@@ -24,47 +24,55 @@ export default function RunPage({ state, updateState }: Props) {
 
   useEffect(() => {
     const unsub = onStream((data: any) => {
-      if (data.type === 'stdout') {
-        setLogs(previous => [...previous, data.data])
-        const match = data.data.match(/(\d+)%/)
-        if (match) setProgress(Number(match[1]))
-      } else if (data.type === 'stderr') {
-        setLogs(previous => [...previous, formatStderr(data.data)])
+      if (data.type === 'progress') {
+        setLogs(prev => [...prev, `[${data.stage}] ${data.message}\n`])
+        if (data.done && data.total) {
+          setProgress(Math.round((data.done / data.total) * 100))
+        }
       } else if (data.type === 'done') {
-        setStatus(data.code === 0 ? 'done' : 'error')
+        if (data.success) {
+          setLogs(prev => [...prev, `Done! Output: ${data.output_path}\n`])
+          setProgress(100)
+          setStatus('done')
+        } else {
+          setLogs(prev => [...prev, `[error] ${data.error}\n`])
+          setStatus('error')
+        }
         updateState({ isRunning: false })
-        setProgress(data.code === 0 ? 100 : progress)
       } else if (data.type === 'error') {
-        setLogs(previous => [...previous, `[error] ${data.error || 'Process failed to start.'}\n`])
+        setLogs(prev => [...prev, `[error] ${data.error || 'Connection failed'}\n`])
         setStatus('error')
         updateState({ isRunning: false })
       }
     })
     return unsub
-  }, [progress, updateState])
+  }, [updateState])
 
   const handlePrepare = async () => {
     setLogs([
       'Preparing local transcription model.\n',
-      'If this is your first local run, Transub may download model files now. Keep this window open; later runs will use the cache.\n\n',
+      'If this is your first local run, model files may be downloaded now.\n\n',
     ])
     setProgress(0)
     setStatus('preparing')
     updateState({ isRunning: true })
 
     const result = await prepareLocalModel(state.configPath || undefined)
-    if (!result.success) {
+    if (result.status === 'ok') {
+      setLogs(prev => [...prev, `${result.message}\n`])
+      setStatus('idle')
+    } else {
+      setLogs(prev => [...prev, `[error] ${result.detail || 'Failed'}\n`])
       setStatus('error')
-      updateState({ isRunning: false })
     }
+    updateState({ isRunning: false })
   }
 
   const handleRun = async () => {
     if (!state.videoPath) return
     setLogs([
       `Input: ${state.videoPath}\n`,
-      'Starting pipeline. Paths with spaces are passed safely to the backend.\n',
-      'First local model use can take a few minutes while model files are cached.\n\n',
+      'Starting pipeline...\n\n',
     ])
     setProgress(0)
     setStatus('running')
@@ -75,7 +83,8 @@ export default function RunPage({ state, updateState }: Props) {
       configPath: state.configPath || undefined,
     })
 
-    if (!result.success && status === 'running') {
+    if (result.status !== 'started') {
+      setLogs(prev => [...prev, `[error] ${result.detail || 'Failed to start'}\n`])
       setStatus('error')
       updateState({ isRunning: false })
     }
@@ -103,7 +112,7 @@ export default function RunPage({ state, updateState }: Props) {
         <div>
           <h1 className="page-title">{transcribeOnly ? 'Transcription Run' : 'Pipeline Run'}</h1>
           <p className="page-kicker">
-            Watch the real CLI process here: extraction, transcription, translation, export, and errors.
+            Real-time pipeline progress: extraction, transcription, translation, export.
           </p>
         </div>
         <div className={`status-pill ${status === 'done' ? 'ready' : status === 'error' ? 'error' : status === 'running' ? 'warning' : ''}`}>
@@ -113,9 +122,9 @@ export default function RunPage({ state, updateState }: Props) {
 
       <div className="dashboard-grid">
         <Card icon={<StepIcon label="1" />} title="Input" description={fileName} status={state.videoPath ? 'ready' : 'pending'} />
-        <Card icon={<StepIcon label="2" />} title="Extract audio" description="ffmpeg working file" status={status === 'running' ? 'warning' : 'pending'} />
-        <Card icon={<StepIcon label="3" />} title="Transcribe" description="Prepare local model before first run" status={status === 'preparing' ? 'warning' : status === 'done' ? 'ready' : 'pending'} />
-        <Card icon={<StepIcon label="4" />} title={transcribeOnly ? 'Skip translate' : 'Translate'} description={transcribeOnly ? 'Dry run mode' : 'Provider API'} status={transcribeOnly ? 'warning' : 'pending'} />
+        <Card icon={<StepIcon label="2" />} title="Extract audio" description="ffmpeg" status={status === 'running' && progress < 10 ? 'warning' : progress >= 10 ? 'ready' : 'pending'} />
+        <Card icon={<StepIcon label="3" />} title="Transcribe" description="faster-whisper" status={status === 'preparing' ? 'warning' : progress >= 30 ? 'ready' : 'pending'} />
+        <Card icon={<StepIcon label="4" />} title={transcribeOnly ? 'Skip translate' : 'Translate'} description={transcribeOnly ? 'Dry run mode' : 'LLM translation'} status={progress >= 60 ? 'ready' : 'pending'} />
       </div>
 
       <section className="console-panel">
@@ -160,9 +169,4 @@ export default function RunPage({ state, updateState }: Props) {
 
 function StepIcon({ label }: { label: string }) {
   return <strong>{label}</strong>
-}
-
-function formatStderr(text: string) {
-  const isError = /(error|failed|traceback|exception|invalid value|does not exist)/i.test(text)
-  return `${isError ? '[error]' : '[info]'} ${text}`
 }

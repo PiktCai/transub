@@ -75,6 +75,26 @@ def main(
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         console.print(app.get_help())
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Bind host"),
+    port: int = typer.Option(18789, help="Bind port"),
+) -> None:
+    """Start the HTTP backend server for the desktop app."""
+    try:
+        from .server import start_server
+    except ImportError:
+        console.print(
+            "[red]Server dependencies not installed.[/]\n"
+            "Install with: uv sync --extra server"
+        )
+        raise typer.Exit(code=1)
+    console.print(f"Starting Transub server on [bold]{host}:{port}[/]")
+    start_server(host=host, port=port)
+
+
 def _print_header(
     *,
     subtitle: str | None = None,

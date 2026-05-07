@@ -2,23 +2,17 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
+import * as http from 'http'
 
 let mainWindow: BrowserWindow | null = null
-let activeProcess: ChildProcess | null = null
+let pythonProcess: ChildProcess | null = null
+const API_PORT = 18789
+const API_BASE = `http://127.0.0.1:${API_PORT}`
 
 const isDev = !app.isPackaged
 const repoRoot = isDev ? path.resolve(process.cwd(), '..') : process.cwd()
 
 app.disableHardwareAcceleration()
-
-function findTransubCommand(): string {
-  return 'uv run transub'
-}
-
-function commandParts(command: string): [string, string[]] {
-  const [bin, ...args] = command.split(' ')
-  return [bin, args]
-}
 
 function processEnv() {
   const pathValue = process.env.PATH || ''
@@ -27,7 +21,50 @@ function processEnv() {
     ...process.env,
     PATH: [...extraPaths, pathValue].filter(Boolean).join(path.delimiter),
     PYTHONUNBUFFERED: '1',
-    HF_HUB_ENABLE_HF_TRANSFER: process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
+  }
+}
+
+async function waitForServer(timeoutMs = 15000): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`${API_BASE}/api/health`)
+      if (res.ok) return true
+    } catch {}
+    await new Promise(r => setTimeout(r, 200))
+  }
+  return false
+}
+
+async function startPythonServer(): Promise<boolean> {
+  const bin = 'uv'
+  const args = ['run', '--extra', 'server', 'transub', 'serve', '--port', String(API_PORT)]
+
+  pythonProcess = spawn(bin, args, {
+    shell: false,
+    cwd: repoRoot,
+    env: processEnv(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  pythonProcess.stdout?.on('data', (data: Buffer) => {
+    console.log('[python]', data.toString().trim())
+  })
+  pythonProcess.stderr?.on('data', (data: Buffer) => {
+    console.error('[python]', data.toString().trim())
+  })
+  pythonProcess.on('exit', (code) => {
+    console.log('[python] exited with code', code)
+    pythonProcess = null
+  })
+
+  return waitForServer()
+}
+
+function stopPythonServer() {
+  if (pythonProcess) {
+    pythonProcess.kill('SIGTERM')
+    pythonProcess = null
   }
 }
 
@@ -61,9 +98,16 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(async () => {
+  const serverReady = await startPythonServer()
+  if (!serverReady) {
+    console.error('Failed to start Python server')
+  }
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
+  stopPythonServer()
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -73,6 +117,74 @@ app.on('activate', () => {
   if (mainWindow === null) {
     createWindow()
   }
+})
+
+app.on('before-quit', () => {
+  stopPythonServer()
+})
+
+async function apiCall(method: string, path: string, body?: any): Promise<any> {
+  const opts: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  }
+  if (body) opts.body = JSON.stringify(body)
+  const res = await fetch(`${API_BASE}${path}`, opts)
+  return res.json()
+}
+
+ipcMain.handle('api:health', async () => {
+  return apiCall('GET', '/api/health')
+})
+
+ipcMain.handle('api:getConfig', async (_event, configPath?: string) => {
+  const qs = configPath ? `?config_path=${encodeURIComponent(configPath)}` : ''
+  return apiCall('GET', `/api/config${qs}`)
+})
+
+ipcMain.handle('api:updateConfig', async (_event, config: object, configPath?: string) => {
+  return apiCall('PUT', '/api/config', { config, config_path: configPath })
+})
+
+ipcMain.handle('api:getAuth', async () => {
+  return apiCall('GET', '/api/auth')
+})
+
+ipcMain.handle('api:saveAuth', async (_event, provider: string, data: { api_key?: string; api_base?: string }) => {
+  return apiCall('PUT', `/api/auth/${provider}`, data)
+})
+
+ipcMain.handle('api:deleteAuth', async (_event, provider: string) => {
+  return apiCall('DELETE', `/api/auth/${provider}`)
+})
+
+ipcMain.handle('api:prepareModel', async (_event, configPath?: string) => {
+  return apiCall('POST', '/api/prepare-model', { config_path: configPath })
+})
+
+ipcMain.handle('api:runPipeline', async (_event, videoPath: string, options: { transcribeOnly?: boolean; configPath?: string; workDir?: string } = {}) => {
+  return apiCall('POST', '/api/run', {
+    video_path: videoPath,
+    transcribe_only: options.transcribeOnly || false,
+    config_path: options.configPath,
+    work_dir: options.workDir,
+  })
+})
+
+ipcMain.handle('api:cancelPipeline', async () => {
+  return apiCall('POST', '/api/cancel')
+})
+
+ipcMain.handle('api:cacheStats', async () => {
+  return apiCall('GET', '/api/cache/stats')
+})
+
+ipcMain.handle('api:clearCache', async () => {
+  return apiCall('DELETE', '/api/cache')
+})
+
+ipcMain.handle('api:stream', async () => {
+  return { url: `${API_BASE}/api/stream` }
 })
 
 ipcMain.handle('dialog:openFile', async (_event, options) => {
@@ -106,97 +218,6 @@ ipcMain.handle('dialog:saveFile', async (_event, options) => {
   return result.canceled ? null : result.filePath
 })
 
-ipcMain.handle('python:run', async (_event, args: string[]) => {
-  const [bin, baseArgs] = commandParts(findTransubCommand())
-  const allArgs = [...baseArgs, ...args]
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn(bin, allArgs, {
-      shell: false,
-      cwd: repoRoot,
-      env: processEnv(),
-    })
-
-    let stdout = ''
-    let stderr = ''
-
-    proc.stdout.on('data', (data: Buffer) => {
-      const text = data.toString()
-      stdout += text
-      mainWindow?.webContents.send('python:stdout', text)
-    })
-
-    proc.stderr.on('data', (data: Buffer) => {
-      const text = data.toString()
-      stderr += text
-      mainWindow?.webContents.send('python:stderr', text)
-    })
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve({ success: true, stdout, stderr, code })
-      } else {
-        resolve({ success: false, stdout, stderr, code })
-      }
-    })
-
-    proc.on('error', (err) => {
-      reject({ success: false, error: err.message })
-    })
-  })
-})
-
-ipcMain.handle('python:runStream', async (_event, args: string[]) => {
-  const [bin, baseArgs] = commandParts(findTransubCommand())
-  const allArgs = [...baseArgs, ...args]
-
-  const proc = spawn(bin, allArgs, {
-    shell: false,
-    cwd: repoRoot,
-    env: processEnv(),
-  })
-
-  activeProcess = proc
-
-  return new Promise((resolve) => {
-    let stdout = ''
-    let stderr = ''
-
-    proc.stdout.on('data', (data: Buffer) => {
-      const text = data.toString()
-      stdout += text
-      mainWindow?.webContents.send('python:stream', { type: 'stdout', data: text })
-    })
-
-    proc.stderr.on('data', (data: Buffer) => {
-      const text = data.toString()
-      stderr += text
-      mainWindow?.webContents.send('python:stream', { type: 'stderr', data: text })
-    })
-
-    proc.on('close', (code) => {
-      activeProcess = null
-      mainWindow?.webContents.send('python:stream', { type: 'done', code })
-      resolve({ success: code === 0, stdout, stderr, code })
-    })
-
-    proc.on('error', (err) => {
-      activeProcess = null
-      mainWindow?.webContents.send('python:stream', { type: 'error', error: err.message })
-      resolve({ success: false, error: err.message })
-    })
-  })
-})
-
-ipcMain.handle('python:cancel', async () => {
-  if (activeProcess) {
-    activeProcess.kill('SIGTERM')
-    activeProcess = null
-    return true
-  }
-  return false
-})
-
 ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
   try {
     const content = fs.readFileSync(filePath, 'utf-8')
@@ -216,23 +237,6 @@ ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string)
   }
 })
 
-ipcMain.handle('fs:exists', async (_event, filePath: string) => {
-  return fs.existsSync(filePath)
-})
-
 ipcMain.handle('path:home', () => {
   return process.env.HOME || process.env.USERPROFILE || ''
-})
-
-ipcMain.handle('path:join', (_event, ...parts: string[]) => {
-  return path.join(...parts)
-})
-
-ipcMain.handle('app:info', () => {
-  return {
-    platform: process.platform,
-    arch: process.arch,
-    isDev,
-    version: app.getVersion(),
-  }
 })

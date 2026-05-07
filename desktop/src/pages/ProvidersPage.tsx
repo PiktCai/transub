@@ -4,7 +4,7 @@ import { PROVIDERS } from '../lib/constants'
 import { clearProviderAuth, readAuth, saveProviderAuth } from '../lib/bridge'
 
 export default function ProvidersPage() {
-  const [auth, setAuth] = useState<Record<string, { api_key?: string; api_base?: string; model?: string }>>({})
+  const [auth, setAuth] = useState<Record<string, { has_key: boolean; api_base: string }>>({})
   const [activeProvider, setActiveProvider] = useState(PROVIDERS[0].id)
   const [draftKey, setDraftKey] = useState('')
   const [draftBase, setDraftBase] = useState('')
@@ -24,30 +24,25 @@ export default function ProvidersPage() {
   useEffect(() => {
     readAuth().then(existing => {
       setAuth(existing)
-      const current = existing[activeProvider]
-      setDraftKey(current?.api_key || '')
-      setDraftBase(current?.api_base || provider.defaultBase)
-      setDraftModel(current?.model || provider.defaultModel)
+      setDraftBase(provider.defaultBase)
+      setDraftModel(provider.defaultModel)
     })
   }, [])
 
   useEffect(() => {
-    const current = auth[activeProvider]
-    setDraftKey(current?.api_key || '')
-    setDraftBase(current?.api_base || provider.defaultBase)
-    setDraftModel(current?.model || provider.defaultModel)
+    setDraftBase(provider.defaultBase)
+    setDraftModel(provider.defaultModel)
     setSaved(false)
-  }, [activeProvider, auth, provider.defaultBase, provider.defaultModel])
+  }, [activeProvider, provider.defaultBase, provider.defaultModel])
 
   const handleSave = async () => {
     await saveProviderAuth(activeProvider, {
       api_key: draftKey || undefined,
       api_base: draftBase || undefined,
-      model: draftModel || undefined,
     })
     setAuth(previous => ({
       ...previous,
-      [activeProvider]: { api_key: draftKey || undefined, api_base: draftBase || undefined, model: draftModel || undefined },
+      [activeProvider]: { has_key: !!draftKey, api_base: draftBase || '' },
     }))
     setSaved(true)
     window.setTimeout(() => setSaved(false), 1600)
@@ -75,8 +70,8 @@ export default function ProvidersPage() {
             environment variables remain higher priority.
           </p>
         </div>
-        <div className={`status-pill ${saved ? 'ready' : auth[activeProvider]?.api_key ? 'ready' : 'warning'}`}>
-          {saved ? 'Saved' : auth[activeProvider]?.api_key ? 'Key saved' : 'Missing key'}
+        <div className={`status-pill ${saved ? 'ready' : auth[activeProvider]?.has_key ? 'ready' : 'warning'}`}>
+          {saved ? 'Saved' : auth[activeProvider]?.has_key ? 'Key saved' : 'Missing key'}
         </div>
       </section>
 
@@ -84,7 +79,7 @@ export default function ProvidersPage() {
         <section className="surface">
           <div className="provider-list">
             {PROVIDERS.map(item => {
-              const hasKey = !!auth[item.id]?.api_key
+              const hasKey = !!auth[item.id]?.has_key
               const active = item.id === activeProvider
               return (
                 <button
