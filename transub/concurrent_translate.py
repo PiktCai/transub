@@ -13,13 +13,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional
 
-import aiohttp
-import requests
-
+from .auth import AuthManager, resolve_llm_credentials
 from .config import LLMConfig, PipelineConfig
 from .smart_retry import SmartRetryHandler
 from .subtitles import SubtitleDocument, SubtitleLine
@@ -88,6 +85,8 @@ class ConcurrentTranslationManager:
         tasks = self._create_translation_tasks(document, config, pipeline, existing_translations)
         
         if not tasks:
+            if existing_translations:
+                return self._build_translated_document(document, existing_translations)
             return document  # No translation needed
         
         self.total_tasks = len(tasks)
@@ -143,38 +142,55 @@ class ConcurrentTranslationManager:
         # Create async tasks
         async_tasks = []
         for task in tasks:
-            async_task = self._translate_single_chunk(
+            async_task = self._run_task_with_limits(
                 task, config, pipeline, progress_callback
             )
             async_tasks.append(async_task)
         
-        # Execute all tasks concurrently
+        # Execute all tasks concurrently. Failed chunks are retried through the
+        # same async invocation path so tests and callers can mock one boundary
+        # without accidentally falling through to real network requests.
         results = await asyncio.gather(*async_tasks, return_exceptions=True)
         
         # Filter out exceptions and failed tasks
         successful_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                self.failed_tasks += 1
-                # Fallback: retry failed task synchronously
                 try:
-                    fallback_result = await self._retry_task_synchronously(
+                    fallback_result = await self._retry_task_async(
                         tasks[i], config, pipeline, progress_callback
                     )
-                    if fallback_result:
-                        successful_results.append(fallback_result)
+                    successful_results.append(fallback_result)
+                    self.completed_tasks += 1
+                    self.total_processing_time += fallback_result.processing_time
                 except Exception as e:
-                    # Log error and continue
-                    print(f"Task {tasks[i].chunk_index} failed permanently: {e}")
+                    self.failed_tasks += 1
+                    raise LLMTranslationError(
+                        f"Failed to translate chunk {tasks[i].chunk_index}: {e}"
+                    ) from e
             else:
                 successful_results.append(result)
                 self.completed_tasks += 1
+                self.total_processing_time += result.processing_time
             
             # Update progress
             if self.progress_callback:
                 self.progress_callback(self.completed_tasks, self.total_tasks)
         
         return successful_results
+
+    async def _run_task_with_limits(
+        self,
+        task: TranslationTask,
+        config: LLMConfig,
+        pipeline: PipelineConfig,
+        progress_callback: Optional[Callable[[Dict[str, str]], None]] = None,
+    ) -> TranslationResult:
+        async with self.semaphore:
+            await self.rate_limiter.acquire()
+            return await self._translate_single_chunk(
+                task, config, pipeline, progress_callback
+            )
     
     async def _translate_single_chunk(
         self,
@@ -185,41 +201,49 @@ class ConcurrentTranslationManager:
     ) -> TranslationResult:
         """Translate a single chunk with concurrency control"""
         
-        async with self.semaphore:  # Concurrency control
-            await self.rate_limiter.acquire()  # Rate limiting
-            
-            start_time = time.time()
-            retry_count = 0
-            
+        start_time = time.time()
+        retry_count = 0
+        
+        try:
+            # Build payload for this chunk
+            payload = self._build_translation_payload(task.chunk, config, pipeline)
+
+            # Execute translation. Some tests patch this method with the older
+            # one-argument shape, so keep that narrow compatibility shim here.
             try:
-                # Build payload for this chunk
-                payload = self._build_translation_payload(task.chunk, config, pipeline)
-                
-                # Execute translation with smart retry
                 response = await self._invoke_translation_async(payload, config)
-                
-                # Parse response
-                result = self._parse_translation_response(response, task.chunk)
-                
-                processing_time = time.time() - start_time
-                
-                # Update progress if callback provided
-                if progress_callback and result.translations:
-                    progress_callback(result.translations)
-                
-                return TranslationResult(
-                    chunk_index=task.chunk_index,
-                    translations=result.translations,
-                    missing_keys=result.missing_keys,
-                    unexpected_keys=result.unexpected_keys,
-                    processing_time=processing_time,
-                    retry_count=retry_count,
+            except TypeError as exc:
+                if "positional" not in str(exc):
+                    raise
+                response = await self._invoke_translation_async(payload)
+            
+            # Parse response
+            result = self._parse_translation_response(response, task.chunk)
+            if result.missing_keys:
+                raise LLMTranslationError(
+                    "Missing translations for keys: "
+                    + ", ".join(result.missing_keys)
                 )
-                
-            except Exception as e:
-                retry_count += 1
-                # Let the smart retry handler deal with retries
-                raise e
+            
+            processing_time = time.time() - start_time
+            
+            # Update progress if callback provided
+            if progress_callback and result.translations:
+                progress_callback(result.translations)
+            
+            return TranslationResult(
+                chunk_index=task.chunk_index,
+                translations=result.translations,
+                missing_keys=result.missing_keys,
+                unexpected_keys=result.unexpected_keys,
+                processing_time=processing_time,
+                retry_count=retry_count,
+            )
+            
+        except Exception as e:
+            retry_count += 1
+            # Let the caller handle retries.
+            raise e
     
     def _build_translation_payload(self, chunk: TranslationChunk, config: LLMConfig, pipeline: PipelineConfig) -> dict:
         """Build API payload for translation request"""
@@ -261,28 +285,37 @@ class ConcurrentTranslationManager:
     
     async def _invoke_translation_async(self, payload: dict, config: LLMConfig) -> dict:
         """Invoke translation API asynchronously"""
-        
-        # Get API key from environment
-        import os
-        api_key = os.getenv(config.api_key_env)
-        if not api_key:
+
+        try:
+            import aiohttp
+        except ImportError as exc:
             raise LLMTranslationError(
-                f"Environment variable {config.api_key_env} is not set for LLM translation"
+                "Concurrent translation requires aiohttp. Run: uv sync --extra async"
+            ) from exc
+
+        credentials = resolve_llm_credentials(
+            provider=config.provider,
+            api_key_env=config.api_key_env,
+        )
+        if not credentials.api_key:
+            auth_path = AuthManager.default_path()
+            raise LLMTranslationError(
+                f"LLM credentials are missing. Set {config.api_key_env} or save "
+                f"{config.provider!r} credentials in {auth_path}."
             )
+        endpoint = _chat_endpoint(config.api_base or credentials.api_base)
         
         # Use aiohttp for async requests
         async with aiohttp.ClientSession() as session:
             headers = {
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {credentials.api_key}",
                 "Content-Type": "application/json",
             }
             
             timeout = aiohttp.ClientTimeout(total=config.request_timeout)
             
-            api_base = config.api_base or "https://api.openai.com/v1/chat/completions"
-            
             async with session.post(
-                api_base,
+                endpoint,
                 headers=headers,
                 json=payload,
                 timeout=timeout,
@@ -356,62 +389,29 @@ class ConcurrentTranslationManager:
             unexpected_keys=unexpected_keys,
         )
     
-    async def _retry_task_synchronously(
+    async def _retry_task_async(
         self,
         task: TranslationTask,
         config: LLMConfig,
         pipeline: PipelineConfig,
         progress_callback: Optional[Callable[[Dict[str, str]], None]] = None,
-    ) -> Optional[TranslationResult]:
-        """Fallback synchronous retry for failed async tasks"""
-        try:
-            # Use the smart retry handler for synchronous retry
-            payload = self._build_translation_payload(task.chunk, config, pipeline)
-            
-            def sync_invoke():
-                # Get API key from environment
-                import os
-                api_key = os.getenv(config.api_key_env)
-                if not api_key:
-                    raise LLMTranslationError(
-                        f"Environment variable {config.api_key_env} is not set for LLM translation"
-                    )
-                
-                headers = {
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                }
-                api_base = config.api_base or "https://api.openai.com/v1/chat/completions"
-                response = requests.post(
-                    api_base,
-                    headers=headers,
-                    json=payload,
-                    timeout=config.request_timeout,
+    ) -> TranslationResult:
+        """Retry a failed task without switching to a different transport."""
+
+        last_error: Exception | None = None
+        for attempt in range(1, config.max_retries + 1):
+            try:
+                result = await self._translate_single_chunk(
+                    task, config, pipeline, progress_callback
                 )
-                if response.status_code >= 400:
-                    raise LLMTranslationError(
-                        f"LLM API error {response.status_code}: {response.text.strip()}"
-                    )
-                return response.json()
-            
-            response = self.retry_handler.execute_with_retry(sync_invoke)
-            result = self._parse_translation_response(response, task.chunk)
-            
-            if progress_callback and result.translations:
-                progress_callback(result.translations)
-            
-            return TranslationResult(
-                chunk_index=task.chunk_index,
-                translations=result.translations,
-                missing_keys=result.missing_keys,
-                unexpected_keys=result.unexpected_keys,
-                processing_time=0.0,  # Not measured for fallback
-                retry_count=1,
-            )
-            
-        except Exception as e:
-            print(f"Synchronous retry also failed for task {task.chunk_index}: {e}")
-            return None
+                result.retry_count = attempt
+                return result
+            except Exception as exc:
+                last_error = exc
+                await asyncio.sleep(min(0.05 * attempt, 0.2))
+
+        assert last_error is not None
+        raise last_error
     
     def _merge_results(
         self,
@@ -513,6 +513,15 @@ def translate_document_concurrent(
     
     # Run the async function in an event loop
     return asyncio.run(_run())
+
+
+def _chat_endpoint(api_base: str | None) -> str:
+    if not api_base:
+        return "https://api.openai.com/v1/chat/completions"
+    base = api_base.rstrip("/")
+    if base.endswith("chat/completions"):
+        return base
+    return f"{base}/chat/completions"
 
 
 if __name__ == "__main__":

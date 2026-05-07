@@ -194,6 +194,12 @@ npm run electron:dev
 python -m unittest
 ```
 
+性能和演示测试默认跳过，避免日常回归过慢。如需运行：
+
+```bash
+TRANSUB_RUN_PERF_TESTS=1 python -m unittest transub.test_concurrent_performance transub.test_retry_performance transub.test_concurrent_demo
+```
+
 ### 代码结构
 
 - 核心代码位于 `transub/`（`cli.py`、`config.py`、`transcribe.py`、`translate.py`、`subtitles.py` 等）。

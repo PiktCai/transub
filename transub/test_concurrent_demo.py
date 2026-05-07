@@ -5,6 +5,7 @@ Demonstration of concurrent translation performance benefits
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import unittest
 from unittest.mock import patch, AsyncMock
@@ -16,6 +17,10 @@ from transub.config import LLMConfig, PipelineConfig
 from transub.translate import TranslationChunk
 
 
+@unittest.skipUnless(
+    os.getenv("TRANSUB_RUN_PERF_TESTS") == "1",
+    "performance/demo tests are opt-in; set TRANSUB_RUN_PERF_TESTS=1",
+)
 class TestConcurrentDemo(unittest.TestCase):
     """Demonstration tests showing concurrent translation benefits"""
     

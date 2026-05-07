@@ -5,7 +5,6 @@ Test module for smart retry functionality
 from __future__ import annotations
 
 import json
-import time
 import unittest
 from unittest.mock import Mock, patch, MagicMock
 import requests
@@ -81,9 +80,10 @@ class TestRetryDelayCalculation(unittest.TestCase):
         """Test exponential backoff calculation"""
         error_type = ErrorType.NETWORK_ERROR
         
-        delay1 = self.handler.calculate_delay(error_type, 1)
-        delay2 = self.handler.calculate_delay(error_type, 2)
-        delay3 = self.handler.calculate_delay(error_type, 3)
+        with patch("transub.smart_retry.random.uniform", return_value=1.0):
+            delay1 = self.handler.calculate_delay(error_type, 1)
+            delay2 = self.handler.calculate_delay(error_type, 2)
+            delay3 = self.handler.calculate_delay(error_type, 3)
         
         # Should be exponential growth (with jitter)
         self.assertLess(delay1, delay2)
@@ -147,6 +147,8 @@ class TestCircuitBreaker(unittest.TestCase):
     
     def test_circuit_recovery(self):
         """Test circuit recovery after timeout"""
+        self.circuit_breaker.recovery_timeout = 0.0
+
         def failing_func():
             raise Exception("Test failure")
         
@@ -156,9 +158,6 @@ class TestCircuitBreaker(unittest.TestCase):
                 self.circuit_breaker.call(failing_func)
             except Exception:
                 pass
-        
-        # Wait for recovery timeout
-        time.sleep(1.1)
         
         # Circuit should be half-open, then closed on success
         def success_func():
@@ -174,6 +173,14 @@ class TestSmartRetryIntegration(unittest.TestCase):
     
     def setUp(self):
         self.handler = SmartRetryHandler(enable_circuit_breaker=False)
+        self.sleep_patcher = patch("transub.smart_retry.time.sleep")
+        self.print_patcher = patch("builtins.print")
+        self.sleep_patcher.start()
+        self.print_patcher.start()
+
+    def tearDown(self):
+        self.print_patcher.stop()
+        self.sleep_patcher.stop()
     
     def test_successful_function_execution(self):
         """Test successful function execution"""

@@ -4,6 +4,7 @@ Performance comparison test between original and smart retry strategies
 
 from __future__ import annotations
 
+import os
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -77,6 +78,10 @@ def original_retry_strategy(func, max_retries=3, base_delay=0.5):
             time.sleep(delay)
 
 
+@unittest.skipUnless(
+    os.getenv("TRANSUB_RUN_PERF_TESTS") == "1",
+    "performance tests are opt-in; set TRANSUB_RUN_PERF_TESTS=1",
+)
 class TestRetryPerformance(unittest.TestCase):
     """Performance comparison tests"""
     
@@ -240,6 +245,10 @@ class TestRetryPerformance(unittest.TestCase):
         self.assertEqual(len(delays_original), len(delays_smart))
 
 
+@unittest.skipUnless(
+    os.getenv("TRANSUB_RUN_PERF_TESTS") == "1",
+    "performance/error demonstration tests are opt-in; set TRANSUB_RUN_PERF_TESTS=1",
+)
 class TestErrorHandlingImprovements(unittest.TestCase):
     """Test error handling improvements"""
     

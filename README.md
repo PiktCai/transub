@@ -212,6 +212,12 @@ Credential handling in the Python backend:
 python -m unittest
 ```
 
+Performance and demonstration tests are opt-in so normal discovery remains fast:
+
+```bash
+TRANSUB_RUN_PERF_TESTS=1 python -m unittest transub.test_concurrent_performance transub.test_retry_performance transub.test_concurrent_demo
+```
+
 ### Code Structure
 
 - Source lives in `transub/` (`cli.py`, `config.py`, `transcribe.py`, `translate.py`, `subtitles.py`, etc.).
