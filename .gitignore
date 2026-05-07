@@ -72,9 +72,16 @@ output/
 .vscode/
 *.swp
 
+# Electron desktop app
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+desktop/out/
+
 # AI assistant notes
 AGENTS.md
 CLAUDE.md
+.sisyphus/
 GEMINI.md
 *.ai.md
 todo.md

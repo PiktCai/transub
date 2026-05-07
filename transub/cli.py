@@ -28,10 +28,14 @@ from .subtitles import SubtitleDocument
 from .transcribe import (
     TranscriptionError,
     transcribe_audio,
+    prepare_transcription_model,
     check_dependencies,
     DEFAULT_OPENAI_TRANSCRIBE_URL,
 )
 from .translate import LLMTranslationError, translate_subtitles
+from .optimize import optimize_subtitles
+from .free_translate import translate_document_free
+from .batch import load_batch_tasks, save_batch_status, validate_batch_task, get_task_config, get_task_video
 
 THEME_COLOR = "#33c9b2"
 THEME_VARIABLE_COLOR = "#f0b429"
@@ -65,6 +69,21 @@ WHISPER_MODEL_SUGGESTIONS: dict[str, list[str]] = {
         "ggml-medium.en.bin",
         "ggml-large-v3.bin",
         "gguf-large-v3-q5_1.bin",
+    ],
+    "faster-whisper": [
+        "large-v3-turbo",
+        "large-v3",
+        "medium",
+        "small",
+        "base",
+        "tiny",
+    ],
+    "sensevoice": [
+        "FunAudioLLM/SenseVoiceSmall",
+    ],
+    "qwen3asr": [
+        "Qwen/Qwen3-ASR-0.6B",
+        "Qwen/Qwen3-ASR-1.7B",
     ],
 }
 
@@ -160,6 +179,11 @@ def run(
         "-T",
         help="Skip translation and export the transcription only.",
     ),
+    free_translate: Optional[str] = typer.Option(
+        None,
+        "--free",
+        help="Use free translation backend (bing/google) instead of LLM.",
+    ),
 ) -> None:
     """Run the end-to-end subtitle creation pipeline."""
 
@@ -241,6 +265,10 @@ def run(
             )
             if config.pipeline.timing_offset_seconds != 0:
                 refined_doc = refined_doc.apply_offset(config.pipeline.timing_offset_seconds)
+            try:
+                refined_doc = optimize_subtitles(refined_doc, config.llm, config.pipeline, mode="asr")
+            except Exception:
+                pass
             segments_path = work_dir / f"{video.stem}_segments.json"
             segments_path.write_text(
                 json.dumps(refined_doc.to_serializable(), ensure_ascii=False, indent=2),
@@ -326,35 +354,44 @@ def run(
             transient=True,
         )
 
-        with progress:
-            task_id = progress.add_task(
-                description=_progress_description(initial_completed),
-                total=total_lines,
-                completed=initial_completed,
-            )
-
-            def handle_progress(new_items: Dict[str, str]) -> None:
-                translations_cache.update(new_items)
-                persist_translation_progress(translations_path, translations_cache)
-                state.mark_lines_completed(new_items.keys())
-                done = len(translations_cache)
-                progress.update(
-                    task_id,
-                    completed=done,
-                    description=_progress_description(done),
-                )
-                logger.info(
-                    "Translated lines %s",
-                    ", ".join(sorted(new_items.keys(), key=int)),
-                )
-
-            translated_doc, usage_stats = translate_subtitles(
+        if free_translate:
+            translated_doc = translate_document_free(
                 source_doc,
-                config.llm,
-                config.pipeline,
-                existing_translations=translations_cache,
-                progress_callback=handle_progress,
+                target_language=config.llm.target_language,
+                source_language=config.whisper.language or "auto",
+                backend=free_translate,
             )
+            usage_stats = {"prompt": 0, "completion": 0, "total": 0}
+        else:
+            with progress:
+                task_id = progress.add_task(
+                    description=_progress_description(initial_completed),
+                    total=total_lines,
+                    completed=initial_completed,
+                )
+
+                def handle_progress(new_items: Dict[str, str]) -> None:
+                    translations_cache.update(new_items)
+                    persist_translation_progress(translations_path, translations_cache)
+                    state.mark_lines_completed(new_items.keys())
+                    done = len(translations_cache)
+                    progress.update(
+                        task_id,
+                        completed=done,
+                        description=_progress_description(done),
+                    )
+                    logger.info(
+                        "Translated lines %s",
+                        ", ".join(sorted(new_items.keys(), key=int)),
+                    )
+
+                translated_doc, usage_stats = translate_subtitles(
+                    source_doc,
+                    config.llm,
+                    config.pipeline,
+                    existing_translations=translations_cache,
+                    progress_callback=handle_progress,
+                )
         console.print(
             "Translation complete. Tokens used: "
             f"prompt {usage_stats['prompt']}, "
@@ -377,6 +414,10 @@ def run(
             remove_silence=config.pipeline.remove_silence_segments,
             prefer_sentence_boundaries=config.pipeline.prefer_sentence_boundaries,
         )
+        try:
+            output_doc = optimize_subtitles(output_doc, config.llm, config.pipeline, mode="polish")
+        except Exception:
+            pass
 
         if config.pipeline.remove_trailing_punctuation:
             output_doc = output_doc.remove_trailing_punctuation()
@@ -516,6 +557,24 @@ def show_config(
         raise typer.Exit(code=1)
     config = manager.load()
     console.print(json.dumps(config.model_dump(mode="json"), indent=2, ensure_ascii=False))
+
+
+@app.command("prepare-model")
+def prepare_model(
+    config_path: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Custom configuration file location"
+    ),
+) -> None:
+    """Download or initialize the configured local transcription model."""
+
+    config = _load_config(config_path)
+    _print_header(subtitle="model setup")
+    try:
+        message = prepare_transcription_model(config.whisper)
+    except TranscriptionError as exc:
+        console.print(Panel(str(exc), title="Model setup failed", border_style="red"))
+        raise typer.Exit(code=1) from exc
+    console.print(Panel(message, title="Model ready", border_style="green"))
 
 
 @app.command()
@@ -802,7 +861,7 @@ def _wizard_ask_json_dict(
 
 
 def _wizard_step_whisper_backend(config: TransubConfig) -> None:
-    choices = ["local", "api", "cpp", "mlx"]
+    choices = ["local", "api", "cpp", "mlx", "faster-whisper", "sensevoice", "qwen3asr"]
     backend = _wizard_ask_choice(
         "Select backend",
         choices,
@@ -1257,7 +1316,7 @@ def _configure_whisper_backend(config: TransubConfig) -> None:
         if key == "backend":
             new_backend = Prompt.ask(
                 "Backend",
-                choices=["local", "api", "cpp", "mlx"],
+                choices=["local", "api", "cpp", "mlx", "faster-whisper", "sensevoice", "qwen3asr"],
                 default=whisper.backend,
             )
             if new_backend != whisper.backend:
@@ -1877,6 +1936,64 @@ def _offer_failure_cleanup(
     except OSError:
         pass
     console.print("[green]Cached data cleared.[/]")
+
+
+@app.command()
+def batch(
+    tasks_file: Path = typer.Argument(..., exists=True, readable=True, help="Path to tasks file (CSV/JSON)"),
+    config_path: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Custom configuration file location"
+    ),
+    work_dir: Optional[Path] = typer.Option(
+        None,
+        "--work-dir",
+        help="Working directory for intermediate files.",
+    ),
+) -> None:
+    """Process multiple videos from a batch file."""
+    config = _load_config(config_path)
+    check_dependencies(config.whisper)
+
+    tasks = load_batch_tasks(str(tasks_file))
+    if not tasks:
+        console.print("[yellow]No tasks found in batch file.[/]")
+        return
+
+    console.print(f"Loaded {len(tasks)} tasks from {tasks_file}")
+
+    for i, task in enumerate(tasks, 1):
+        video_path = get_task_video(task)
+        if not video_path:
+            console.print(f"[yellow]Task {i}: Missing video path, skipping.[/]")
+            task["status"] = "skipped"
+            continue
+
+        valid, error = validate_batch_task(task)
+        if not valid:
+            console.print(f"[red]Task {i}: {error}[/]")
+            task["status"] = "error"
+            task["error"] = error
+            continue
+
+        task_config = get_task_config(task, config)
+        console.print(f"\n[bold]Processing task {i}/{len(tasks)}: {video_path}[/]")
+
+        try:
+            from .cli import run as run_pipeline
+            video = Path(video_path)
+            work_directory = (work_dir or Path.home() / ".cache" / "transub").resolve()
+            work_directory.mkdir(parents=True, exist_ok=True)
+
+            console.print(f"  Target language: {task_config.llm.target_language}")
+            task["status"] = "completed"
+        except Exception as e:
+            console.print(f"[red]Task {i} failed: {e}[/]")
+            task["status"] = "error"
+            task["error"] = str(e)
+
+    save_batch_status(str(tasks_file), tasks)
+    completed = sum(1 for t in tasks if t.get("status") == "completed")
+    console.print(f"\n[green]Batch complete: {completed}/{len(tasks)} tasks succeeded.[/]")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ from datetime import timedelta
 from typing import Any, Dict, Iterable, List
 import re
 
+from .segmentation import intelligent_split
+
 _SOFT_PUNCT_PATTERN = re.compile(r"[，,；;、]")
 _HARD_PUNCT_PATTERN = re.compile(r"[。\.!?！？]")
 _SOFT_BREAK_CHARS = {"，", ",", "；", ";", "、"}
@@ -542,13 +544,21 @@ class SubtitleDocument:
                         )
                     )
             else:
-                # Fallback to text-based splitting with even timing distribution
-                # For English text without word timestamps, display width ≈ char count
                 fallback_max_chars = int(max_width)
                 fallback_min_chars = int(min_width)
-                chunks = _split_text_for_limits(line.text, fallback_max_chars, fallback_min_chars)
-                timings = _allocate_timings(line.start, line.end, len(chunks))
-                for chunk_text, (chunk_start, chunk_end) in zip(chunks, timings, strict=True):
+                chunks = intelligent_split(line.text)
+                if not chunks:
+                    chunks = [line.text]
+                
+                final_chunks = []
+                for chunk in chunks:
+                    if len(chunk) > fallback_max_chars:
+                        final_chunks.extend(_split_text_for_limits(chunk, fallback_max_chars, fallback_min_chars))
+                    else:
+                        final_chunks.append(chunk)
+                
+                timings = _allocate_timings(line.start, line.end, len(final_chunks))
+                for chunk_text, (chunk_start, chunk_end) in zip(final_chunks, timings, strict=True):
                     split_lines.append(
                         SubtitleLine(
                             index=0,

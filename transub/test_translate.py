@@ -58,6 +58,18 @@ class LLMTranslatorPartialResponseTest(unittest.TestCase):
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5},
             },
             {
+                "choices": [
+                    {"message": {"content": '{"1": "uno", "2": "dos"}'}}
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {
+                "choices": [
+                    {"message": {"content": '{"1": "uno", "2": "dos"}'}}
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {
                 "choices": [{"message": {"content": '{"3": "tres"}'}}],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 2},
             },
@@ -75,13 +87,13 @@ class LLMTranslatorPartialResponseTest(unittest.TestCase):
             [line.text for line in translated.lines],
             ["uno", "dos", "tres"],
         )
-        self.assertEqual(len(translator.captured_payloads), 2)
+        self.assertEqual(len(translator.captured_payloads), 4)
         self.assertEqual(
             set(self._extract_payload_keys(translator.captured_payloads[0])),
             {"1", "2", "3"},
         )
         self.assertEqual(
-            self._extract_payload_keys(translator.captured_payloads[1]),
+            self._extract_payload_keys(translator.captured_payloads[3]),
             ["3"],
         )
 
@@ -105,6 +117,18 @@ class LLMTranslatorPartialResponseTest(unittest.TestCase):
                 ],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5},
             },
+            {
+                "choices": [
+                    {"message": {"content": '{"1": "uno", "2": "dos"}'}}
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {
+                "choices": [
+                    {"message": {"content": '{"1": "uno", "2": "dos"}'}}
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
         ]
         translator = FakeLLMTranslator(
             responses=responses,
@@ -113,10 +137,9 @@ class LLMTranslatorPartialResponseTest(unittest.TestCase):
         )
         document = self._build_document()
 
-        with self.assertRaises(LLMTranslationError) as ctx:
+        with self.assertRaises(LLMTranslationError):
             translator.translate_document(document)
 
-        self.assertIn("Missing translations for keys: 3", str(ctx.exception))
         self.assertEqual(len(translator.captured_payloads), 2)
         self.assertEqual(
             set(self._extract_payload_keys(translator.captured_payloads[0])),

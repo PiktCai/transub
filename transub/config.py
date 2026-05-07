@@ -51,7 +51,7 @@ class WhisperConfig(BaseModel):
     """Configuration for Whisper transcription."""
 
     backend: str = Field(
-        default="local", description="Which backend to use: local, api, cpp, or mlx"
+        default="local", description="Which backend to use: local, api, cpp, mlx, faster-whisper, sensevoice, or qwen3asr"
     )
     execution_mode: str = Field(
         default="internal",
@@ -152,12 +152,16 @@ class WhisperConfig(BaseModel):
         default=True,
         description="Extract word-level timestamps for more accurate subtitle timing (strongly recommended).",
     )
+    forced_aligner: str | None = Field(
+        default=None,
+        description="Forced aligner model for Qwen3-ASR timestamps, e.g. 'Qwen/Qwen3-ForcedAligner-0.6B'.",
+    )
 
     @model_validator(mode="after")
     def validate_backend(self) -> "WhisperConfig":
         backend = self.backend.lower()
-        if backend not in {"local", "api", "cpp", "mlx"}:
-            raise ValueError("backend must be 'local', 'api', 'cpp', or 'mlx'")
+        if backend not in {"local", "api", "cpp", "mlx", "faster-whisper", "sensevoice", "qwen3asr"}:
+            raise ValueError("backend must be 'local', 'api', 'cpp', 'mlx', 'faster-whisper', 'sensevoice', or 'qwen3asr'")
         object.__setattr__(self, "backend", backend)
         if backend == "cpp" and not self.cpp_model_path:
             raise ValueError("cpp_model_path must be set when backend is 'cpp'")
@@ -189,6 +193,12 @@ class LLMConfig(BaseModel):
     style: str | None = Field(
         default="Simplified Chinese",
         description="Optional description of translation tone/style",
+    )
+    context_window: int = Field(
+        default=2,
+        description="Number of previous/next lines to include for context",
+        ge=0,
+        le=10,
     )
 
 
@@ -295,6 +305,10 @@ class PipelineConfig(BaseModel):
     remove_silence_segments: bool = Field(
         default=True,
         description="Remove subtitle segments that contain only long silences (requires word_timestamps)",
+    )
+    glossary_path: str | None = Field(
+        default=None,
+        description="Path to glossary file (JSON or CSV) for consistent terminology",
     )
 
     @model_validator(mode="after")

@@ -60,9 +60,38 @@ def check_dependencies(config: WhisperConfig) -> None:
     """Check for required dependencies and determine execution mode."""
     backend = config.backend
     if backend == "api":
-        return  # No local dependencies to check
+        return
 
-    # Try to import the package first
+    if backend == "faster-whisper":
+        try:
+            import faster_whisper
+            return
+        except ImportError:
+            raise TranscriptionError(
+                "faster-whisper is required for the recommended local engine. "
+                "From the project folder, run: uv sync --extra faster-whisper"
+            )
+
+    if backend == "sensevoice":
+        try:
+            import funasr
+            return
+        except ImportError:
+            raise TranscriptionError(
+                "funasr is required for SenseVoice. From the project folder, run: "
+                "uv sync --extra funasr"
+            )
+
+    if backend == "qwen3asr":
+        try:
+            import qwen_asr
+            return
+        except ImportError:
+            raise TranscriptionError(
+                "qwen-asr is required for Qwen3-ASR. From the project folder, run: "
+                "uv sync --extra qwen-asr"
+            )
+
     try:
         if backend == "local":
             import whisper  # type: ignore
@@ -71,7 +100,7 @@ def check_dependencies(config: WhisperConfig) -> None:
         config.execution_mode = "internal"
         return
     except ImportError:
-        pass  # Package not found, try to find a CLI tool
+        pass
 
     # If package import fails, look for a CLI tool
     cli_map: dict[str, list[str]] = {
@@ -96,12 +125,14 @@ def check_dependencies(config: WhisperConfig) -> None:
     if backend == "local":
         raise TranscriptionError(
             "For the 'local' backend, you must either install 'openai-whisper' in the same "
-            "environment as transub, or have the 'whisper' command-line tool in your PATH."
+            "environment as transub, or have the 'whisper' command-line tool in your PATH. "
+            "From the project folder, run: uv add openai-whisper"
         )
     if backend == "mlx":
         raise TranscriptionError(
             "For the 'mlx' backend, you must either install 'mlx-whisper' in the same "
-            "environment as transub, or have the 'mlx-whisper' (or 'mlx_whisper') command-line tool in your PATH."
+            "environment as transub, or have the 'mlx-whisper' (or 'mlx_whisper') command-line tool in your PATH. "
+            "From the project folder, run: uv add mlx-whisper"
         )
     if backend == "cpp":
         binary = config.cpp_binary or "whisper-cpp"
@@ -122,6 +153,117 @@ def transcribe_audio(audio_path: Path, config: WhisperConfig) -> SubtitleDocumen
         return _transcribe_cpp(audio_path, config)
     if config.backend == "mlx":
         return _transcribe_mlx(audio_path, config)
+    if config.backend == "faster-whisper":
+        return _transcribe_faster_whisper(audio_path, config)
+    if config.backend == "sensevoice":
+        return _transcribe_sensevoice(audio_path, config)
+    if config.backend == "qwen3asr":
+        return _transcribe_qwen3asr(audio_path, config)
+    raise TranscriptionError(f"Unsupported whisper backend: {config.backend}")
+
+
+def prepare_transcription_model(config: WhisperConfig) -> str:
+    """Download or initialize the configured local transcription model.
+
+    This is intentionally safe to run before any video is selected. It gives GUI users
+    a visible first-run setup step instead of letting a model download happen in the
+    middle of a pipeline run.
+    """
+
+    check_dependencies(config)
+
+    if config.backend == "api":
+        return "Cloud transcription is selected; no local model download is needed."
+
+    if config.backend == "faster-whisper":
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:  # pragma: no cover - check_dependencies covers this
+            raise TranscriptionError(
+                "faster-whisper is required. From the project folder, run: "
+                "uv sync --extra faster-whisper"
+            ) from exc
+        device = config.device or "cpu"
+        compute_type = "int8" if device == "cpu" else "float16"
+        model_size = config.model or "base"
+        DOWNLOAD_CONSOLE.print(
+            f"Preparing faster-whisper model [bold]{model_size}[/]. "
+            "The first run may download files; later runs use the local cache."
+        )
+        WhisperModel(model_size, device=device, compute_type=compute_type)
+        return f"faster-whisper model is ready: {model_size}"
+
+    if config.backend == "local":
+        if config.execution_mode == "external":
+            return f"Whisper CLI is available: {config.cli_path}"
+        try:
+            import whisper  # type: ignore
+        except ImportError as exc:  # pragma: no cover - check_dependencies covers this
+            raise TranscriptionError(
+                "openai-whisper is required. From the project folder, run: "
+                "uv add openai-whisper"
+            ) from exc
+        model_name = config.model or "base"
+        DOWNLOAD_CONSOLE.print(
+            f"Preparing OpenAI Whisper model [bold]{model_name}[/]. "
+            "The first run may download files; later runs use the local cache."
+        )
+        whisper.load_model(model_name, device=config.device or None)
+        return f"OpenAI Whisper model is ready: {model_name}"
+
+    if config.backend == "mlx":
+        if config.execution_mode == "external":
+            return f"mlx-whisper CLI is available: {config.cli_path}"
+        repo_id = config.model or "mlx-community/whisper-small.en"
+        local_path = _ensure_local_mlx_repo(repo_id)
+        return f"MLX Whisper model is ready: {local_path}"
+
+    if config.backend == "cpp":
+        if not config.cpp_model_path:
+            raise TranscriptionError(
+                "whisper.cpp is selected, but no model file is configured. "
+                "Set cpp_model_path to a local ggml/gguf model file."
+            )
+        model_path = Path(config.cpp_model_path).expanduser()
+        if not model_path.exists():
+            raise TranscriptionError(f"whisper.cpp model file does not exist: {model_path}")
+        return f"whisper.cpp model file is ready: {model_path}"
+
+    if config.backend == "sensevoice":
+        try:
+            from funasr import AutoModel
+        except ImportError as exc:  # pragma: no cover - check_dependencies covers this
+            raise TranscriptionError(
+                "funasr is required. From the project folder, run: uv sync --extra funasr"
+            ) from exc
+        DOWNLOAD_CONSOLE.print(
+            "Preparing SenseVoice model. The first run may download model files."
+        )
+        AutoModel(
+            model="FunAudioLLM/SenseVoiceSmall",
+            vad_model="fsmn-vad",
+            vad_kwargs={"max_single_segment_time": 30000},
+            device=config.device or "cpu",
+            hub="hf",
+        )
+        return "SenseVoice model is ready: FunAudioLLM/SenseVoiceSmall"
+
+    if config.backend == "qwen3asr":
+        try:
+            from qwen_asr import Qwen3ASRModel
+        except ImportError as exc:  # pragma: no cover - check_dependencies covers this
+            raise TranscriptionError(
+                "qwen-asr is required. From the project folder, run: "
+                "uv sync --extra qwen-asr"
+            ) from exc
+        model_name = config.model or "Qwen/Qwen3-ASR-0.6B"
+        DOWNLOAD_CONSOLE.print(
+            f"Preparing Qwen3-ASR model [bold]{model_name}[/]. "
+            "The first run may download model files."
+        )
+        Qwen3ASRModel.from_pretrained(model_name)
+        return f"Qwen3-ASR model is ready: {model_name}"
+
     raise TranscriptionError(f"Unsupported whisper backend: {config.backend}")
 
 
@@ -190,7 +332,7 @@ def _transcribe_local_internal(audio_path: Path, config: WhisperConfig) -> Subti
     except ImportError as exc:
         raise TranscriptionError(
             "whisper Python package is required for internal transcription. "
-            "Install it via 'pip install openai-whisper' or ensure the 'whisper' CLI is in your PATH."
+            "Install it via 'uv add openai-whisper' or ensure the 'whisper' CLI is in your PATH."
         ) from exc
 
     device = config.device or None
@@ -577,4 +719,190 @@ def _extract_segments_from_cpp(payload: Dict[str, Any]) -> list[dict[str, Any]]:
     return results
 
 
-__all__ = ["transcribe_audio", "TranscriptionError"]
+def _transcribe_faster_whisper(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+    """Transcribe using faster-whisper (CTranslate2 backend)."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise TranscriptionError(
+            "faster-whisper is required for this backend. "
+            "From the project folder, run: uv sync --extra faster-whisper"
+        ) from exc
+
+    device = config.device or "cpu"
+    compute_type = "int8" if device == "cpu" else "float16"
+
+    model_size = config.model if config.model != "base" else "base"
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+
+    transcribe_kwargs = {}
+    if config.language and config.language != "auto":
+        transcribe_kwargs["language"] = config.language
+    if config.word_timestamps:
+        transcribe_kwargs["word_timestamps"] = True
+    if config.temperature is not None:
+        transcribe_kwargs["temperature"] = config.temperature
+
+    segments_gen, _ = model.transcribe(str(audio_path), **transcribe_kwargs)
+
+    segments = []
+    for segment in segments_gen:
+        seg = {
+            "start": segment.start,
+            "end": segment.end,
+            "text": segment.text.strip(),
+        }
+        if config.word_timestamps and segment.words:
+            seg["words"] = [
+                {"word": w.word, "start": w.start, "end": w.end}
+                for w in segment.words
+            ]
+        segments.append(seg)
+
+    if not segments:
+        raise TranscriptionError("faster-whisper returned no segments")
+    return SubtitleDocument.from_whisper_segments(segments)
+
+
+def _transcribe_sensevoice(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+    """Transcribe using SenseVoice (FunAudioLLM)."""
+    try:
+        from funasr import AutoModel
+    except ImportError as exc:
+        raise TranscriptionError(
+            "funasr is required for SenseVoice backend. "
+            "From the project folder, run: uv sync --extra funasr"
+        ) from exc
+
+    model_kwargs = {
+        "model": "FunAudioLLM/SenseVoiceSmall",
+        "vad_model": "fsmn-vad",
+        "vad_kwargs": {"max_single_segment_time": 30000},
+        "device": config.device or "cpu",
+        "hub": "hf",
+    }
+    model = AutoModel(**model_kwargs)
+
+    gen_kwargs = {
+        "input": str(audio_path),
+        "cache": {},
+        "language": config.language or "auto",
+        "use_itn": True,
+        "batch_size_s": 60,
+        "merge_vad": True,
+        "merge_length_s": 15,
+    }
+    results = model.generate(**gen_kwargs)
+
+    segments = []
+    for res in results:
+        text = res.get("text", "")
+        if hasattr(model.model, "tokenizer") and hasattr(res, "text"):
+            try:
+                from funasr.utils.postprocess_utils import rich_transcription_postprocess
+                text = rich_transcription_postprocess(text)
+            except Exception:
+                pass
+
+        start = float(res.get("timestamp", [[0]])[0][0]) if res.get("timestamp") else 0.0
+        end = float(res.get("timestamp", [[0]])[-1][-1]) if res.get("timestamp") else 0.0
+
+        if text.strip():
+            segments.append({
+                "start": start,
+                "end": end,
+                "text": text.strip(),
+            })
+
+    if not segments:
+        raise TranscriptionError("SenseVoice returned no segments")
+    return SubtitleDocument.from_whisper_segments(segments)
+
+
+def _transcribe_qwen3asr(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+    """Transcribe using Qwen3-ASR."""
+    try:
+        from qwen_asr import Qwen3ASRModel
+    except ImportError as exc:
+        raise TranscriptionError(
+            "qwen-asr is required for Qwen3-ASR backend. "
+            "From the project folder, run: uv sync --extra qwen-asr"
+        ) from exc
+
+    model_name = config.model or "Qwen/Qwen3-ASR-0.6B"
+    aligner_name = config.forced_aligner
+
+    has_cuda = False
+    try:
+        import torch
+        has_cuda = torch.cuda.is_available()
+    except ImportError:
+        pass
+
+    use_aligner = config.word_timestamps and has_cuda
+    if use_aligner and not aligner_name:
+        aligner_name = "Qwen/Qwen3-ForcedAligner-0.6B"
+
+    model_kwargs: dict = {}
+    aligner_kwargs: dict = {}
+
+    if has_cuda:
+        try:
+            import torch
+            model_kwargs["device_map"] = "cuda:0"
+            model_kwargs["dtype"] = torch.bfloat16
+            aligner_kwargs["device_map"] = "cuda:0"
+            aligner_kwargs["dtype"] = torch.bfloat16
+        except ImportError:
+            pass
+
+    try:
+        model = Qwen3ASRModel.from_pretrained(
+            model_name,
+            forced_aligner=aligner_name if use_aligner else None,
+            forced_aligner_kwargs=aligner_kwargs if use_aligner else None,
+            **model_kwargs,
+        )
+    except Exception as exc:
+        raise TranscriptionError(f"Failed to load Qwen3-ASR model: {exc}") from exc
+
+    use_timestamps = config.word_timestamps and model.forced_aligner is not None
+    results = model.transcribe(
+        audio=str(audio_path),
+        language=config.language if config.language and config.language != "auto" else None,
+        return_time_stamps=use_timestamps,
+    )
+
+    segments = []
+    for result in results:
+        text = (result.text or "").strip()
+        if not text:
+            continue
+
+        if use_timestamps and result.time_stamps is not None:
+            align_result = result.time_stamps
+            if hasattr(align_result, "items"):
+                words = []
+                for item in align_result.items:
+                    words.append({
+                        "word": item.text,
+                        "start": item.start_time,
+                        "end": item.end_time,
+                    })
+                if words:
+                    segments.append({
+                        "start": words[0]["start"],
+                        "end": words[-1]["end"],
+                        "text": text,
+                        "words": words,
+                    })
+                    continue
+
+        segments.append({"start": 0.0, "end": 0.0, "text": text})
+
+    if not segments:
+        raise TranscriptionError("Qwen3-ASR returned no segments")
+    return SubtitleDocument.from_whisper_segments(segments)
+
+
+__all__ = ["transcribe_audio", "prepare_transcription_model", "TranscriptionError"]

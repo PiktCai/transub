@@ -78,12 +78,12 @@ uv tool upgrade transub
 - **本地后端（离线使用或自定义模型）：**
   - **常规使用（本地 CPU/GPU）**
     ```bash
-    pip install openai-whisper
+    uv add openai-whisper
     ```
   
   - **Apple Silicon（macOS）**
     ```bash
-    pip install mlx-whisper
+    uv add mlx-whisper
     ```
   
   - **`whisper.cpp`**
@@ -108,6 +108,14 @@ transub run /path/to/video.mp4
 ```
 
 生成的字幕默认保存在原视频所在目录，支持 `.srt` 与 `.vtt`。如仅需原始转写，可在命令中追加 `--transcribe-only`。
+
+第一次使用本地模型时，建议先准备模型：
+
+```bash
+transub prepare-model
+```
+
+它会下载或初始化当前配置的本地 ASR 模型。后续运行会复用本地缓存。
 
 > [!TIP]
 > 更换视频或切换 Whisper 配置前，可清理默认缓存目录 `~/.cache/transub`，或直接通过 `--work-dir` 指向临时位置以避免旧缓存干扰。
@@ -138,6 +146,7 @@ timing_offset_seconds = 0.05
 
 ```bash
 transub run demo.mp4 --config ~/transub.conf --work-dir /tmp/transub  # 覆盖默认缓存目录（默认使用 ~/.cache/transub）
+transub prepare-model                 # 下载/初始化当前配置的本地 ASR 模型
 transub show_config
 transub init --config ./transub.conf   # 重新运行初始化向导
 transub configure                      # 编辑配置（0 保存，Q 放弃）
@@ -151,6 +160,27 @@ transub --version                     # 查看当前安装的版本号
 ## 开发者指南
 
 如果希望参与贡献，可按以下步骤搭建本地环境。
+
+### 桌面 GUI
+
+桌面前端是 `desktop/` 下的 **Electron + React + TypeScript** 应用，提供可视化的流水线配置、凭据管理、转录/翻译运行和字幕预览界面。
+
+启动开发环境：
+
+```bash
+cd desktop
+npm install
+npm run electron:dev
+```
+
+`npm run electron:dev` 会启动真正的 Electron 应用，可测试原生文件选择器和 Python 后端桥接。`npm run dev` 只是浏览器预览，不能测试这些桌面能力。
+
+后端已经加入 provider 级别的凭据管理：
+
+- 默认 auth 文件位于 `~/.transub/auth.toml`；
+- 可用 `TRANSUB_AUTH` 覆盖 auth 文件路径；
+- 环境变量中的 key 优先级高于 auth 文件；
+- 不要提交 auth 文件，也不要在日志中打印 API key。
 
 ### 从源码安装
 
@@ -166,11 +196,11 @@ transub --version                     # 查看当前安装的版本号
    ```
 3. **可编辑方式安装并拉取开发依赖**
    ```bash
-   pip install -e ".[dev]"
+   uv sync --extra dev
    ```
 4. **安装测试用 Whisper 后端**
    ```bash
-   pip install openai-whisper
+   uv add openai-whisper
    ```
 
 ### 运行测试
