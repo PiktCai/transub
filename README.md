@@ -173,6 +173,11 @@ npm run electron:dev
 
 Use `npm run electron:dev` to test real desktop functionality such as native file pickers and the Python bridge. `npm run dev` is only a browser renderer preview.
 
+The Electron app starts a local FastAPI backend automatically. It prefers
+`localhost:18789` and falls back to nearby ports if needed. The run screen shows
+human-readable stage progress and output paths; detailed backend logs are saved
+under `~/.cache/transub/logs/` for debugging.
+
 Credential handling in the Python backend:
 
 - provider-scoped credentials are stored in `~/.transub/auth.toml`;

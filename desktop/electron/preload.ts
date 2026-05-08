@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 export interface ElectronBridge {
   api: {
     health: () => Promise<any>
+    status: () => Promise<any>
     getConfig: (configPath?: string) => Promise<any>
     updateConfig: (config: object, configPath?: string) => Promise<any>
     getAuth: () => Promise<any>
@@ -27,11 +28,15 @@ export interface ElectronBridge {
   path: {
     home: () => Promise<string>
   }
+  shell: {
+    revealPath: (path: string) => Promise<{ success: boolean; error?: string }>
+  }
 }
 
 const bridge: ElectronBridge = {
   api: {
     health: () => ipcRenderer.invoke('api:health'),
+    status: () => ipcRenderer.invoke('api:status'),
     getConfig: (configPath) => ipcRenderer.invoke('api:getConfig', configPath),
     updateConfig: (config, configPath) => ipcRenderer.invoke('api:updateConfig', config, configPath),
     getAuth: () => ipcRenderer.invoke('api:getAuth'),
@@ -55,6 +60,9 @@ const bridge: ElectronBridge = {
   },
   path: {
     home: () => ipcRenderer.invoke('path:home'),
+  },
+  shell: {
+    revealPath: (path) => ipcRenderer.invoke('shell:revealPath', path),
   },
 }
 

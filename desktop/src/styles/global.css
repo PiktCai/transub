@@ -678,6 +678,209 @@ code {
   border-radius: var(--radius-md);
 }
 
+.run-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+}
+
+.run-dashboard {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.run-progress-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-warm);
+}
+
+.run-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.run-progress-meta strong {
+  color: var(--ink);
+}
+
+.run-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  align-items: start;
+}
+
+.stage-board {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.stage-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 66px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stage-row:last-child {
+  border-bottom: 0;
+}
+
+.stage-row.done {
+  background: rgba(237, 238, 207, 0.42);
+}
+
+.stage-row.active {
+  background: var(--blue-soft);
+}
+
+.stage-row.error {
+  background: var(--red-soft);
+}
+
+.stage-marker {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.stage-row.done .stage-marker {
+  border-color: rgba(102, 128, 11, 0.32);
+  color: var(--green);
+}
+
+.stage-row.active .stage-marker {
+  border-color: rgba(32, 94, 166, 0.32);
+  color: var(--blue);
+}
+
+.stage-row.error .stage-marker {
+  border-color: rgba(175, 48, 41, 0.34);
+  color: var(--red);
+}
+
+.stage-row strong {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.stage-row span:not(.stage-marker) {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.run-inspector {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-warm);
+}
+
+.run-inspector h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.file-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--paper);
+}
+
+.file-action span {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.file-action strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-feed {
+  display: grid;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.activity-item,
+.empty-activity {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.activity-item:last-child {
+  border-bottom: 0;
+}
+
+.activity-item strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.activity-item span,
+.empty-activity {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.activity-item.done {
+  background: rgba(237, 238, 207, 0.34);
+}
+
+.activity-item.error {
+  background: rgba(255, 225, 213, 0.46);
+}
+
 .log-console {
   height: 300px;
   overflow: auto;
@@ -999,5 +1202,9 @@ code {
 
   .dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .run-workspace {
+    grid-template-columns: 1fr;
   }
 }

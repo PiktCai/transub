@@ -13,11 +13,17 @@ All notable changes to this project will be documented in this file.
 ### Added
 - `transub prepare-model` command for pre-downloading/initializing the local ASR model.
 - Progress messages (`print(flush=True)`) for long-running CLI steps so Electron GUI can display them.
+- Desktop FastAPI status endpoint and per-run debug log files under `~/.cache/transub/logs/`.
 
 ### Removed
 - All non-faster-whisper ASR backends and their configuration fields.
 - `DEFAULT_OPENAI_TRANSCRIBE_URL` constant.
 - `DownloadProgressBar`, `DOWNLOAD_CONSOLE`, `_suppress_tqdm` helpers (no longer needed).
+
+### Fixed
+- Desktop pipeline events are now broadcast from background worker threads through the server event loop, so the GUI receives progress and completion updates reliably.
+- Electron now falls back to a nearby backend port when `18789` is already occupied and reports API errors as structured responses.
+- The run screen no longer presents a black terminal-style log panel as the primary UI; it shows task stages, output paths, and a revealable debug log instead.
 
 ## [0.2.2] - 2025-10-27
 

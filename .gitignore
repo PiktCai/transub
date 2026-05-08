@@ -82,6 +82,7 @@ desktop/out/
 AGENTS.md
 CLAUDE.md
 .sisyphus/
+.pet-runs/
 GEMINI.md
 *.ai.md
 todo.md

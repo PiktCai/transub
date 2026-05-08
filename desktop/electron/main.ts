@@ -1,13 +1,13 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
-import * as http from 'http'
+import * as net from 'net'
 
 let mainWindow: BrowserWindow | null = null
 let pythonProcess: ChildProcess | null = null
-const API_PORT = 18789
-const API_BASE = `http://127.0.0.1:${API_PORT}`
+let apiPort = 18789
+const apiBase = () => `http://127.0.0.1:${apiPort}`
 
 const isDev = !app.isPackaged
 const repoRoot = isDev ? path.resolve(process.cwd(), '..') : process.cwd()
@@ -24,11 +24,30 @@ function processEnv() {
   }
 }
 
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const server = net.createServer()
+    server.once('error', () => resolve(false))
+    server.once('listening', () => {
+      server.close(() => resolve(true))
+    })
+    server.listen(port, '127.0.0.1')
+  })
+}
+
+async function chooseApiPort(): Promise<number> {
+  if (await isPortFree(18789)) return 18789
+  for (let port = 18790; port < 18820; port += 1) {
+    if (await isPortFree(port)) return port
+  }
+  throw new Error('No free Transub backend port found.')
+}
+
 async function waitForServer(timeoutMs = 15000): Promise<boolean> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${API_BASE}/api/health`)
+      const res = await fetch(`${apiBase()}/api/health`)
       if (res.ok) return true
     } catch {}
     await new Promise(r => setTimeout(r, 200))
@@ -37,8 +56,9 @@ async function waitForServer(timeoutMs = 15000): Promise<boolean> {
 }
 
 async function startPythonServer(): Promise<boolean> {
+  apiPort = await chooseApiPort()
   const bin = 'uv'
-  const args = ['run', '--extra', 'server', 'transub', 'serve', '--port', String(API_PORT)]
+  const args = ['run', '--extra', 'server', 'transub', 'serve', '--port', String(apiPort)]
 
   pythonProcess = spawn(bin, args, {
     shell: false,
@@ -99,9 +119,13 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  const serverReady = await startPythonServer()
-  if (!serverReady) {
-    console.error('Failed to start Python server')
+  try {
+    const serverReady = await startPythonServer()
+    if (!serverReady) {
+      console.error('Failed to start Python server')
+    }
+  } catch (err) {
+    console.error('Failed to start Python server', err)
   }
   createWindow()
 })
@@ -129,12 +153,25 @@ async function apiCall(method: string, path: string, body?: any): Promise<any> {
     headers: { 'Content-Type': 'application/json' },
   }
   if (body) opts.body = JSON.stringify(body)
-  const res = await fetch(`${API_BASE}${path}`, opts)
-  return res.json()
+  try {
+    const res = await fetch(`${apiBase()}${path}`, opts)
+    const text = await res.text()
+    const payload = text ? JSON.parse(text) : {}
+    if (!res.ok) {
+      return { status: 'error', detail: payload.detail || res.statusText, statusCode: res.status }
+    }
+    return payload
+  } catch (err: any) {
+    return { status: 'error', detail: err?.message || 'Backend connection failed' }
+  }
 }
 
 ipcMain.handle('api:health', async () => {
   return apiCall('GET', '/api/health')
+})
+
+ipcMain.handle('api:status', async () => {
+  return apiCall('GET', '/api/status')
 })
 
 ipcMain.handle('api:getConfig', async (_event, configPath?: string) => {
@@ -184,7 +221,7 @@ ipcMain.handle('api:clearCache', async () => {
 })
 
 ipcMain.handle('api:stream', async () => {
-  return { url: `${API_BASE}/api/stream` }
+  return { url: `${apiBase()}/api/stream` }
 })
 
 ipcMain.handle('dialog:openFile', async (_event, options) => {
@@ -239,4 +276,10 @@ ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string)
 
 ipcMain.handle('path:home', () => {
   return process.env.HOME || process.env.USERPROFILE || ''
+})
+
+ipcMain.handle('shell:revealPath', async (_event, filePath: string) => {
+  if (!filePath) return { success: false, error: 'No path provided' }
+  shell.showItemInFolder(filePath)
+  return { success: true }
 })

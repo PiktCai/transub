@@ -8,32 +8,47 @@ frontend can call it without spawning CLI subprocesses.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime
 import json
 import logging
-import os
-import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .auth import AuthManager
 from .cache import clear_cache, get_cache_stats
 from .config import ConfigManager, TransubConfig
-from .free_translate import translate_document_free
 from .optimize import optimize_subtitles
 from .state import PipelineState, load_translation_progress, persist_translation_progress
 from .subtitles import SubtitleDocument
 from .transcribe import TranscriptionError, check_dependencies, prepare_transcription_model, transcribe_audio
-from .translate import LLMTranslationError, translate_subtitles
+from .translate import translate_subtitles
 
 logger = logging.getLogger("transub.server")
 
-app = FastAPI(title="Transub", version="0.3.0")
+_sse_subscribers: list[asyncio.Queue] = []
+_active_pipeline: Optional[threading.Thread] = None
+_active_pipeline_lock = threading.Lock()
+_pipeline_status: dict = {"state": "idle"}
+_pipeline_cancelled = False
+_server_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global _server_loop
+    _server_loop = asyncio.get_running_loop()
+    yield
+
+
+app = FastAPI(title="Transub", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,10 +57,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_sse_subscribers: list[asyncio.Queue] = []
-_active_pipeline: Optional[threading.Thread] = None
-_pipeline_cancelled = False
-
 
 async def _broadcast(event: str, data: dict) -> None:
     for q in _sse_subscribers:
@@ -53,13 +64,26 @@ async def _broadcast(event: str, data: dict) -> None:
 
 
 def _sync_broadcast(event: str, data: dict) -> None:
-    loop = None
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        pass
-    if loop and loop.is_running():
-        loop.create_task(_broadcast(event, data))
+    if _server_loop and _server_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast(event, data), _server_loop)
+
+
+def _set_pipeline_status(**updates: object) -> None:
+    with _active_pipeline_lock:
+        _pipeline_status.update(updates)
+
+
+def _run_log_path(work_dir: Path, video: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_stem = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in video.stem)
+    return work_dir / "logs" / f"{timestamp}-{safe_stem}-{uuid4().hex[:8]}.log"
+
+
+def _append_log(log_path: Path, message: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    stamped = datetime.now().strftime("%H:%M:%S")
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[{stamped}] {message}\n")
 
 
 def _get_config(config_path: Optional[str] = None) -> TransubConfig:
@@ -97,6 +121,12 @@ class PrepareModelRequest(BaseModel):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": "0.3.0"}
+
+
+@app.get("/api/status")
+async def status():
+    with _active_pipeline_lock:
+        return dict(_pipeline_status)
 
 
 @app.get("/api/config")
@@ -158,7 +188,10 @@ async def prepare_model(body: PrepareModelRequest):
 @app.post("/api/run")
 async def run_pipeline(body: RunRequest):
     global _active_pipeline, _pipeline_cancelled
-    _pipeline_cancelled = False
+    with _active_pipeline_lock:
+        if _active_pipeline and _active_pipeline.is_alive():
+            raise HTTPException(status_code=409, detail="A pipeline is already running.")
+        _pipeline_cancelled = False
 
     video = Path(body.video_path)
     if not video.exists():
@@ -167,16 +200,29 @@ async def run_pipeline(body: RunRequest):
     config = _get_config(body.config_path)
     work_dir = Path(body.work_dir) if body.work_dir else Path.home() / ".cache" / "transub"
     work_dir.mkdir(parents=True, exist_ok=True)
+    log_path = _run_log_path(work_dir, video)
+    run_id = uuid4().hex
+    _append_log(log_path, f"Starting run {run_id}")
+    _append_log(log_path, f"Input: {video}")
+    _append_log(log_path, f"Mode: {'transcribe-only' if body.transcribe_only else 'full pipeline'}")
 
     thread = threading.Thread(
         target=_run_pipeline_thread,
-        args=(video, config, work_dir, body.transcribe_only),
+        args=(run_id, video, config, work_dir, body.transcribe_only, log_path),
         daemon=True,
     )
-    _active_pipeline = thread
+    with _active_pipeline_lock:
+        _active_pipeline = thread
+        _pipeline_status.update({
+            "state": "running",
+            "run_id": run_id,
+            "video": str(video),
+            "log_path": str(log_path),
+            "progress": 0,
+        })
     thread.start()
 
-    return {"status": "started", "video": str(video)}
+    return {"status": "started", "video": str(video), "run_id": run_id, "log_path": str(log_path)}
 
 
 @app.post("/api/cancel")
@@ -188,6 +234,8 @@ async def cancel_pipeline():
 
 @app.get("/api/stream")
 async def stream():
+    global _server_loop
+    _server_loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     _sse_subscribers.append(queue)
 
@@ -217,15 +265,33 @@ async def clear_cache_endpoint():
 
 
 def _run_pipeline_thread(
+    run_id: str,
     video: Path,
     config: TransubConfig,
     work_dir: Path,
     transcribe_only: bool,
+    log_path: Path,
 ) -> None:
-    global _pipeline_cancelled
+    global _pipeline_cancelled, _active_pipeline
 
-    def emit(event: str, data: dict) -> None:
-        _sync_broadcast(event, data)
+    def emit(event: str, data: dict, *, log: Optional[str] = None) -> None:
+        payload = {"run_id": run_id, "log_path": str(log_path), **data}
+        if log or data.get("message") or data.get("error"):
+            _append_log(log_path, log or str(data.get("message") or data.get("error")))
+        if event == "progress":
+            _set_pipeline_status(
+                state="running",
+                stage=payload.get("stage"),
+                message=payload.get("message"),
+                progress=payload.get("percent", _pipeline_status.get("progress", 0)),
+            )
+        elif event == "done":
+            _set_pipeline_status(
+                state="done" if payload.get("success") else "error",
+                message=payload.get("error") or payload.get("output_path"),
+                progress=100 if payload.get("success") else _pipeline_status.get("progress", 0),
+            )
+        _sync_broadcast(event, payload)
 
     def check_cancelled() -> bool:
         return _pipeline_cancelled
@@ -242,12 +308,12 @@ def _run_pipeline_thread(
             return
 
         if not (audio_path and audio_path.exists()):
-            emit("progress", {"stage": "extracting", "message": "Extracting audio..."})
+            emit("progress", {"stage": "extracting", "message": "Extracting audio...", "percent": 8})
             from .audio import extract_audio
             audio_path = extract_audio(video, config.pipeline, work_dir)
             audio_path = audio_path.resolve()
             state.set_audio_path(audio_path)
-            emit("progress", {"stage": "extracting", "message": "Audio extracted."})
+            emit("progress", {"stage": "extracting", "message": "Audio extracted.", "percent": 18})
 
         if check_cancelled():
             emit("done", {"success": False, "error": "Cancelled"})
@@ -257,9 +323,9 @@ def _run_pipeline_thread(
             with segments_path.open("r", encoding="utf-8") as fh:
                 segment_payload = json.load(fh)
             source_doc = SubtitleDocument.from_serialized(segment_payload)
-            emit("progress", {"stage": "transcribing", "message": "Loaded cached transcription."})
+            emit("progress", {"stage": "transcribing", "message": "Loaded cached transcription.", "percent": 50})
         else:
-            emit("progress", {"stage": "transcribing", "message": "Transcribing audio..."})
+            emit("progress", {"stage": "transcribing", "message": "Transcribing audio...", "percent": 24})
             raw_doc = transcribe_audio(audio_path, config.whisper)
 
             if check_cancelled():
@@ -279,11 +345,11 @@ def _run_pipeline_thread(
             if config.pipeline.timing_offset_seconds != 0:
                 refined_doc = refined_doc.apply_offset(config.pipeline.timing_offset_seconds)
 
-            emit("progress", {"stage": "optimizing", "message": "Optimizing transcription..."})
+            emit("progress", {"stage": "optimizing", "message": "Optimizing transcription...", "percent": 42})
             try:
                 refined_doc = optimize_subtitles(refined_doc, config.llm, config.pipeline, mode="asr")
-            except Exception:
-                pass
+            except Exception as e:
+                _append_log(log_path, f"ASR optimization skipped: {e}")
 
             segments_path = work_dir / f"{video.stem}_segments.json"
             segments_path.write_text(
@@ -292,7 +358,7 @@ def _run_pipeline_thread(
             )
             state.mark_transcription(segments_path, len(refined_doc.lines))
             source_doc = refined_doc
-            emit("progress", {"stage": "transcribing", "message": f"Transcription complete ({len(refined_doc.lines)} lines)."})
+            emit("progress", {"stage": "transcribing", "message": f"Transcription complete ({len(refined_doc.lines)} lines).", "percent": 52})
 
         output_dir = (
             Path(config.pipeline.output_dir)
@@ -322,9 +388,10 @@ def _run_pipeline_thread(
                 "message": f"Translated {len(existing_translations)}/{len(source_doc.lines)} lines.",
                 "done": len(existing_translations),
                 "total": len(source_doc.lines),
+                "percent": 58 + round((len(existing_translations) / max(len(source_doc.lines), 1)) * 28),
             })
 
-        emit("progress", {"stage": "translating", "message": "Translating subtitles..."})
+        emit("progress", {"stage": "translating", "message": "Translating subtitles...", "percent": 58})
         translated_doc, usage_stats = translate_subtitles(
             source_doc, config.llm, config.pipeline,
             existing_translations=existing_translations,
@@ -335,7 +402,7 @@ def _run_pipeline_thread(
             emit("done", {"success": False, "error": "Cancelled"})
             return
 
-        emit("progress", {"stage": "polishing", "message": "Polishing translation..."})
+        emit("progress", {"stage": "polishing", "message": "Polishing translation...", "percent": 88})
         output_doc = translated_doc.refine(
             max_width=config.pipeline.translation_max_display_width or 30.0,
             min_width=config.pipeline.translation_min_display_width or 15.0,
@@ -349,8 +416,8 @@ def _run_pipeline_thread(
 
         try:
             output_doc = optimize_subtitles(output_doc, config.llm, config.pipeline, mode="polish")
-        except Exception:
-            pass
+        except Exception as e:
+            _append_log(log_path, f"Translation polishing skipped: {e}")
 
         if config.pipeline.remove_trailing_punctuation:
             output_doc = output_doc.remove_trailing_punctuation()
@@ -375,6 +442,9 @@ def _run_pipeline_thread(
     except Exception as e:
         logger.exception("Pipeline failed")
         emit("done", {"success": False, "error": str(e)})
+    finally:
+        with _active_pipeline_lock:
+            _active_pipeline = None
 
 
 def _write_document(document: SubtitleDocument, target_dir: Path, stem: str, suffix: str, fmt: str) -> Path:

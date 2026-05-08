@@ -159,6 +159,8 @@ npm run electron:dev
 
 `npm run electron:dev` 会启动真正的 Electron 应用，可测试原生文件选择器和 Python 后端桥接。`npm run dev` 只是浏览器预览，不能测试这些桌面能力。
 
+Electron 会自动启动本地 FastAPI 后端。默认优先使用 `localhost:18789`，如果端口被占用会自动尝试附近端口。运行页只展示面向用户的阶段进度和输出路径；详细后端日志会保存到 `~/.cache/transub/logs/`，用于排查问题。
+
 后端已经加入 provider 级别的凭据管理：
 
 - 默认 auth 文件位于 `~/.transub/auth.toml`；

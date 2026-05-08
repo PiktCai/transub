@@ -158,6 +158,7 @@ class TestCircuitBreaker(unittest.TestCase):
                 self.circuit_breaker.call(failing_func)
             except Exception:
                 pass
+        self.circuit_breaker.last_failure_time = -1.0
         
         # Circuit should be half-open, then closed on success
         def success_func():
