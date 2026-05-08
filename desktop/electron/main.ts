@@ -57,12 +57,23 @@ async function waitForServer(timeoutMs = 15000): Promise<boolean> {
 
 async function startPythonServer(): Promise<boolean> {
   apiPort = await chooseApiPort()
-  const bin = 'uv'
-  const args = ['run', '--extra', 'server', 'transub', 'serve', '--port', String(apiPort)]
 
+  if (isDev) {
+    return startWithCommand('uv', ['run', '--extra', 'server', 'transub', 'serve', '--port', String(apiPort)], repoRoot, 15000)
+  }
+
+  const bundledBinary = path.join(process.resourcesPath || '', 'transub-server')
+  if (fs.existsSync(bundledBinary)) {
+    return startWithCommand(bundledBinary, [String(apiPort)], path.dirname(bundledBinary), 20000)
+  }
+
+  return startWithCommand('transub', ['serve', '--port', String(apiPort)], process.env.HOME || '/', 10000)
+}
+
+async function startWithCommand(bin: string, args: string[], cwd: string, timeoutMs: number): Promise<boolean> {
   pythonProcess = spawn(bin, args, {
     shell: false,
-    cwd: repoRoot,
+    cwd,
     env: processEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -78,7 +89,7 @@ async function startPythonServer(): Promise<boolean> {
     pythonProcess = null
   })
 
-  return waitForServer()
+  return waitForServer(timeoutMs)
 }
 
 function stopPythonServer() {
