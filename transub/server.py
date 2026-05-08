@@ -378,7 +378,7 @@ def _run_pipeline_thread(
 
         output_dir = (
             Path(config.pipeline.output_dir)
-            if config.pipeline.output_dir is not None
+            if config.pipeline.output_dir
             else video.parent
         )
 

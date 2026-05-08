@@ -1218,3 +1218,49 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+@keyframes stage-fill {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.stage-marker.active {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+  color: var(--accent);
+}
+
+.stage-row.active {
+  position: relative;
+}
+
+.stage-row.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: stage-fill 30s linear forwards;
+  opacity: 0.4;
+}
+
+.sub-progress {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(0,0,0,0.06);
+  overflow: hidden;
+}
+
+.sub-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}

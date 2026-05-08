@@ -20,6 +20,7 @@ export default function RunPage({ state, updateState }: Props) {
   const [progress, setProgress] = useState(initialRunState.progress)
   const [status, setStatus] = useState<'idle' | 'preparing' | 'running' | 'done' | 'error'>(initialRunState.status)
   const [activeStage, setActiveStage] = useState(initialRunState.activeStage)
+  const [stageProgress, setStageProgress] = useState<Record<string, number>>({})
   const [outputPath, setOutputPath] = useState<string | null>(initialRunState.outputPath)
   const [logPath, setLogPath] = useState<string | null>(initialRunState.logPath)
   const eventRef = useRef<HTMLDivElement>(null)
@@ -80,6 +81,9 @@ export default function RunPage({ state, updateState }: Props) {
         if (data.log_path) setLogPath(data.log_path)
         if (typeof data.percent === 'number') {
           setProgress(previous => Math.max(previous, Math.min(99, data.percent)))
+          if (data.stage) {
+            setStageProgress(prev => ({ ...prev, [data.stage]: data.percent }))
+          }
         }
         if (data.done && data.total) {
           setProgress(previous => Math.max(previous, Math.round((data.done / data.total) * 86)))
@@ -153,6 +157,7 @@ export default function RunPage({ state, updateState }: Props) {
     setProgress(0)
     setStatus('running')
     setActiveStage('queued')
+    setStageProgress({})
     setOutputPath(null)
     setLogPath(null)
     updateState({ isRunning: true })
@@ -249,10 +254,17 @@ export default function RunPage({ state, updateState }: Props) {
           <div className="stage-board">
             {stages.map(stage => (
               <div key={stage.id} className={`stage-row ${stage.state}`}>
-                <span className="stage-marker">{stage.state === 'done' ? '✓' : stage.state === 'active' ? '•' : stage.state === 'error' ? '!' : ''}</span>
-                <div>
+                <span className={`stage-marker ${stage.state}`}>
+                  {stage.state === 'done' ? '✓' : stage.state === 'active' ? '●' : stage.state === 'error' ? '!' : '○'}
+                </span>
+                <div style={{ flex: 1 }}>
                   <strong>{stage.title}</strong>
                   <span>{stage.detail}</span>
+                  {stage.state === 'active' && typeof stageProgress[stage.id] === 'number' && (
+                    <div className="sub-progress">
+                      <div className="sub-progress-fill" style={{ width: `${stageProgress[stage.id]}%` }} />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
