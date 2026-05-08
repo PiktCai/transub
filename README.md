@@ -182,6 +182,17 @@ The Electron app starts a local FastAPI backend automatically. It prefers
 human-readable stage progress and output paths; detailed backend logs are saved
 under `~/.cache/transub/logs/` for debugging.
 
+To build a distributable desktop app, use:
+
+```bash
+cd desktop
+npm run package
+```
+
+The package script first builds the bundled Python server at
+`desktop/resources/transub-server`; that generated binary is platform-specific
+and intentionally ignored by Git.
+
 Credential handling in the Python backend:
 
 - provider-scoped credentials are stored in `~/.transub/auth.toml`;

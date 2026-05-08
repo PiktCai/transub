@@ -1,6 +1,8 @@
 {
   "name": "transub-desktop",
   "version": "0.1.0",
+  "description": "Desktop subtitle transcription and translation app.",
+  "author": "PiktCai",
   "private": true,
   "main": "out/main/main.js",
   "scripts": {
@@ -9,9 +11,10 @@
     "preview": "vite preview",
     "electron:dev": "electron-vite dev --config vite.electron.config.ts",
     "electron:build": "tsc && electron-vite build --config vite.electron.config.ts",
-    "package": "electron-vite build --config vite.electron.config.ts && electron-builder --mac",
-    "package:win": "electron-vite build --config vite.electron.config.ts && electron-builder --win",
-    "package:linux": "electron-vite build --config vite.electron.config.ts && electron-builder --linux"
+    "build:server": "uv run --project .. --extra server --with pyinstaller pyinstaller --clean --onefile --paths .. --name transub-server --distpath resources --workpath build/transub-server --specpath build server_entry.py",
+    "package": "npm run build:server && npm run electron:build && electron-builder --mac",
+    "package:win": "npm run build:server && npm run electron:build && electron-builder --win",
+    "package:linux": "npm run build:server && npm run electron:build && electron-builder --linux"
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -32,8 +35,10 @@
     "appId": "com.transub.desktop",
     "productName": "Transub",
     "directories": {
+      "buildResources": "assets",
       "output": "release"
     },
+    "icon": "assets/icon",
     "files": [
       "out/**/*",
       "dist/**/*"
@@ -43,6 +48,10 @@
         "from": "resources/",
         "to": ".",
         "filter": ["**/*"]
+      },
+      {
+        "from": "assets/icon.png",
+        "to": "icon.png"
       }
     ],
     "mac": {

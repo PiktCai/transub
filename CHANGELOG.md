@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 - Progress messages (`print(flush=True)`) for long-running CLI steps so Electron GUI can display them.
 - Desktop FastAPI status endpoint and per-run debug log files under `~/.cache/transub/logs/`.
 - Desktop transcription progress updates based on faster-whisper segment timestamps.
+- Desktop app icon assets and electron-builder icon wiring.
+- `npm run build:server` for reproducibly generating the bundled Python backend binary before desktop packaging.
 
 ### Removed
 - All non-faster-whisper ASR backends and their configuration fields.
@@ -28,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - The run screen no longer presents a black terminal-style log panel as the primary UI; it shows task stages, output paths, and a revealable debug log instead.
 - Provider API key fields no longer leak the previous provider's typed key when switching providers.
 - Failed run state is preserved when leaving and returning to the Run tab, so users can fix configuration and retry without losing context.
+- Bundled server packaging no longer depends on an ignored local binary being present in the checkout.
 
 ## [0.2.2] - 2025-10-27
 

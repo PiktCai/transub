@@ -148,6 +148,26 @@ Before publishing, verify:
 - [ ] Tested on TestPyPI successfully
 - [ ] Git working directory is clean (or changes are intentional)
 
+## Desktop Distribution
+
+The Electron app bundles the Python FastAPI backend as a platform-specific
+binary. Build the distributable from the desktop workspace:
+
+```bash
+cd desktop
+npm run package
+```
+
+Notes:
+
+- `npm run package` automatically runs `build:server`.
+- `desktop/resources/transub-server` is generated and intentionally ignored by Git.
+- Use `npm run build:server` directly when you only need to validate the bundled
+  backend binary.
+- The app icon assets are tracked in `desktop/assets/`.
+- On macOS without a Developer ID certificate, electron-builder can create a DMG
+  with ad-hoc signing, but notarization is skipped.
+
 ## Homebrew Distribution
 
 1. **Ensure a GitHub release is available**

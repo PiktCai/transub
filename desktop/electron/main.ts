@@ -11,6 +11,9 @@ const apiBase = () => `http://127.0.0.1:${apiPort}`
 
 const isDev = !app.isPackaged
 const repoRoot = isDev ? path.resolve(process.cwd(), '..') : process.cwd()
+const windowIcon = isDev
+  ? path.join(repoRoot, 'desktop/assets/icon.png')
+  : path.join(process.resourcesPath || '', 'icon.png')
 
 app.disableHardwareAcceleration()
 
@@ -107,6 +110,7 @@ function createWindow() {
     minHeight: 640,
     title: 'Transub',
     backgroundColor: '#FFFCF0',
+    icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,

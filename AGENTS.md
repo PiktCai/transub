@@ -69,7 +69,7 @@ transub/
 - **Do NOT run tests via pytest**: Use `python -m unittest`.
 - **Do NOT commit `transub.conf`**: User-specific config; use `transub-sample.conf` as reference.
 - **Do NOT commit auth files**: `~/.transub/auth.toml` contains provider API keys and must stay outside the repo.
-- **Do NOT commit generated desktop artifacts**: keep `desktop/node_modules/`, `desktop/dist/`, and `desktop/out/` ignored.
+- **Do NOT commit generated desktop artifacts**: keep `desktop/node_modules/`, `desktop/dist/`, `desktop/out/`, `desktop/build/`, `desktop/release/`, and `desktop/resources/transub-server` ignored.
 - **Do NOT add ASR backend selectors**: transcription is intentionally faster-whisper only.
 
 ## UNIQUE STYLES
@@ -82,6 +82,7 @@ transub/
 - **Free Translators**: Cost-free Bing/Google translation backends for budget-conscious users.
 - **Provider Credentials**: LLM keys are provider-scoped. Environment variables still win, then `~/.transub/auth.toml`.
 - **GUI Direction**: The desktop frontend is Electron/React with a native, tool-oriented Flexoki UI.
+- **Desktop Icon Direction**: Tracked icon assets live in `desktop/assets/`; generated build/package outputs stay ignored.
 - **Run Feedback Direction**: The run page should feel like a native task monitor, not a terminal emulator. Keep detailed logs saved and revealable from Finder.
 - **Resume Direction**: Failed desktop runs should preserve selected video, stage, error, and log path when leaving the Run tab. Retrying should reuse cached audio/transcription/translation state where the backend supports it.
 - **ASR Direction**: Be opinionated. Do not re-add API, whisper.cpp, MLX, SenseVoice, Qwen3-ASR, or openai-whisper backend selection unless explicitly requested.
@@ -95,6 +96,7 @@ transub run video.mp4 --free bing  # Use free Bing translator
 transub batch tasks.csv         # Batch processing
 transub serve                   # Start HTTP backend for desktop app
 cd desktop && npm run electron:dev  # Launch real Electron desktop app
+cd desktop && npm run package       # Build bundled Python server and package desktop app
 transub prepare-model           # Pre-download/initialize configured local ASR model
 python -m unittest discover     # Run all tests
 TRANSUB_RUN_PERF_TESTS=1 python -m unittest transub.test_concurrent_performance transub.test_retry_performance transub.test_concurrent_demo

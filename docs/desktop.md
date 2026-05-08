@@ -79,6 +79,21 @@ cd desktop
 npm run electron:build
 ```
 
+For distributable builds, run the package script:
+
+```bash
+cd desktop
+npm run package
+```
+
+`npm run package` runs `build:server` automatically before electron-builder.
+The server binary is generated at `desktop/resources/transub-server` and is
+intentionally ignored by Git because it is large and platform-specific. Use
+`npm run build:server` directly only when validating the bundled backend in
+isolation. The app icon sources live in `desktop/assets/`; electron-builder uses
+`desktop/assets/icon.icns`, `desktop/assets/icon.ico`, and
+`desktop/assets/icon.png`.
+
 ## Credentials
 
 Provider credentials are managed by the Python backend:

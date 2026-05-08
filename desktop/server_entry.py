@@ -1,13 +1,4 @@
 import sys
-import os
-import types
-
-if getattr(sys, '_MEIPASS', None):
-    sys.path.insert(0, sys._MEIPASS)
-    stub = types.ModuleType("transub")
-    stub.__path__ = [os.path.join(sys._MEIPASS, "transub")]
-    stub.__package__ = "transub"
-    sys.modules["transub"] = stub
 
 from transub.server import start_server
 

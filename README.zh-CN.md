@@ -165,6 +165,15 @@ npm run electron:dev
 
 Electron 会自动启动本地 FastAPI 后端。默认优先使用 `localhost:18789`，如果端口被占用会自动尝试附近端口。运行页只展示面向用户的阶段进度和输出路径；详细后端日志会保存到 `~/.cache/transub/logs/`，用于排查问题。
 
+如需构建可分发的桌面应用：
+
+```bash
+cd desktop
+npm run package
+```
+
+该脚本会先在 `desktop/resources/transub-server` 生成打包用的 Python 后端二进制。这个文件与平台相关且体积较大，已被 Git 忽略，不应提交。
+
 后端已经加入 provider 级别的凭据管理：
 
 - 默认 auth 文件位于 `~/.transub/auth.toml`；
