@@ -326,7 +326,23 @@ def _run_pipeline_thread(
             emit("progress", {"stage": "transcribing", "message": "Loaded cached transcription.", "percent": 50})
         else:
             emit("progress", {"stage": "transcribing", "message": "Transcribing audio...", "percent": 24})
-            raw_doc = transcribe_audio(audio_path, config.whisper)
+
+            def handle_transcription_progress(update: Dict[str, object]) -> None:
+                duration = float(update.get("duration") or 0.0)
+                position = float(update.get("position") or 0.0)
+                segment_count = int(update.get("segment_count") or 0)
+                if duration > 0:
+                    percent = 24 + min(24, round((position / duration) * 24))
+                    message = (
+                        f"Transcribed {segment_count} segments "
+                        f"({format_seconds(position)} / {format_seconds(duration)})."
+                    )
+                else:
+                    percent = min(48, 24 + min(segment_count, 24))
+                    message = f"Transcribed {segment_count} segments."
+                emit("progress", {"stage": "transcribing", "message": message, "percent": percent})
+
+            raw_doc = transcribe_audio(audio_path, config.whisper, progress_callback=handle_transcription_progress)
 
             if check_cancelled():
                 emit("done", {"success": False, "error": "Cancelled"})
@@ -465,6 +481,15 @@ def _language_suffix(language: str) -> str:
     if not language or language == "auto":
         return ""
     return f".{language}"
+
+
+def format_seconds(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    minutes, remaining = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{remaining:02d}"
+    return f"{minutes:d}:{remaining:02d}"
 
 
 def start_server(host: str = "127.0.0.1", port: int = 18789) -> None:

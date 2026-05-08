@@ -62,6 +62,7 @@ transub/
 - **Performance tests**: Demo/performance tests are opt-in with `TRANSUB_RUN_PERF_TESTS=1` so default discovery stays fast and quiet.
 - **Git checkpoints**: For GUI work or broad multi-file changes, make a small verified checkpoint commit before handing off. Prefer commits that can be reverted cleanly over one giant uncommitted working tree.
 - **Desktop run UI**: Keep detailed command/backend logs out of the main run screen. Show stage status and saved file paths; write debug logs to `~/.cache/transub/logs/`.
+- **Provider secrets UI**: Treat provider keys like a secret manager. Never echo saved keys into inputs; clear key drafts when switching providers; use an explicit action to set the active translation provider.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - **Do NOT split `cli.py` yet**: It is intentionally monolithic for now.
@@ -82,6 +83,7 @@ transub/
 - **Provider Credentials**: LLM keys are provider-scoped. Environment variables still win, then `~/.transub/auth.toml`.
 - **GUI Direction**: The desktop frontend is Electron/React with a native, tool-oriented Flexoki UI.
 - **Run Feedback Direction**: The run page should feel like a native task monitor, not a terminal emulator. Keep detailed logs saved and revealable from Finder.
+- **Resume Direction**: Failed desktop runs should preserve selected video, stage, error, and log path when leaving the Run tab. Retrying should reuse cached audio/transcription/translation state where the backend supports it.
 - **ASR Direction**: Be opinionated. Do not re-add API, whisper.cpp, MLX, SenseVoice, Qwen3-ASR, or openai-whisper backend selection unless explicitly requested.
 
 ## COMMANDS

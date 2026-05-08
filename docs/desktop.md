@@ -25,6 +25,12 @@ already running.
 The run screen should stay user-facing: it shows stage status, output location,
 and a saved debug log path. Detailed backend messages are written to
 `~/.cache/transub/logs/*.log` instead of being shown as a black terminal panel.
+During transcription, the backend emits progress whenever faster-whisper yields
+a segment, using segment timestamps against the audio duration.
+
+Run state is also persisted in the renderer's local storage. If a run fails,
+leaving and returning to the Run tab should preserve the failed state, selected
+video, debug log path, and the ability to run again after configuration changes.
 
 ## Run During Development
 
@@ -81,6 +87,13 @@ Provider credentials are managed by the Python backend:
 - override path: `TRANSUB_AUTH`
 - environment variables win over auth-file values
 - never commit auth files or print API keys in logs
+
+The Providers page follows a secret-manager style flow:
+
+- saved API keys are never echoed back into the password field;
+- switching providers clears the key input so secrets do not appear under the wrong provider;
+- saving a provider stores credentials only;
+- selecting the provider for actual pipeline translation is a separate `Use for translation` action that writes the active LLM provider/model/base into `transub.conf`.
 
 ## Debug Logs
 

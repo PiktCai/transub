@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import WhisperConfig
 from .subtitles import SubtitleDocument
@@ -47,7 +47,11 @@ def prepare_transcription_model(config: WhisperConfig) -> str:
     )
 
 
-def transcribe_audio(audio_path: Path, config: WhisperConfig) -> SubtitleDocument:
+def transcribe_audio(
+    audio_path: Path,
+    config: WhisperConfig,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> SubtitleDocument:
     """Transcribe audio with faster-whisper and word-level timestamps."""
 
     check_dependencies(config)
@@ -92,10 +96,11 @@ def transcribe_audio(audio_path: Path, config: WhisperConfig) -> SubtitleDocumen
         transcribe_kwargs.setdefault("initial_prompt", config.initial_prompt)
 
     try:
-        segments_gen, _ = model.transcribe(str(audio_path), **transcribe_kwargs)
+        segments_gen, info = model.transcribe(str(audio_path), **transcribe_kwargs)
     except TypeError as exc:
         raise TranscriptionError(f"faster-whisper rejected transcription options: {exc}") from exc
 
+    duration = max(float(getattr(info, "duration_after_vad", 0.0) or getattr(info, "duration", 0.0) or 0.0), 0.0)
     segments: list[dict[str, Any]] = []
     for segment in segments_gen:
         text = segment.text.strip()
@@ -117,6 +122,15 @@ def transcribe_audio(audio_path: Path, config: WhisperConfig) -> SubtitleDocumen
                 for word in words
             ]
         segments.append(payload)
+        if progress_callback:
+            progress_callback(
+                {
+                    "segment_count": len(segments),
+                    "position": float(segment.end or 0.0),
+                    "duration": duration,
+                    "text": text,
+                }
+            )
 
     if not segments:
         raise TranscriptionError("faster-whisper returned no subtitle segments.")

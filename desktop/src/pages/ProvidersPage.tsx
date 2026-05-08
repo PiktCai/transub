@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Input, Select } from '../components/FormControls'
 import { PROVIDERS } from '../lib/constants'
-import { clearProviderAuth, readAuth, saveProviderAuth } from '../lib/bridge'
+import { clearProviderAuth, readAuth, readConfig, saveProviderAuth, writeConfig } from '../lib/bridge'
 
-export default function ProvidersPage() {
+interface Props {
+  configPath: string | null
+}
+
+export default function ProvidersPage({ configPath }: Props) {
   const [auth, setAuth] = useState<Record<string, { has_key: boolean; api_base: string }>>({})
   const [activeProvider, setActiveProvider] = useState(PROVIDERS[0].id)
   const [draftKey, setDraftKey] = useState('')
   const [draftBase, setDraftBase] = useState('')
   const [draftModel, setDraftModel] = useState(PROVIDERS[0].defaultModel)
   const [saved, setSaved] = useState(false)
+  const [usingProvider, setUsingProvider] = useState<string | null>(null)
 
   const provider = useMemo(
     () => PROVIDERS.find(item => item.id === activeProvider) || PROVIDERS[0],
@@ -27,10 +32,14 @@ export default function ProvidersPage() {
       setDraftBase(provider.defaultBase)
       setDraftModel(provider.defaultModel)
     })
-  }, [])
+    readConfig(configPath || undefined).then(existing => {
+      setUsingProvider(existing?.llm?.provider || null)
+    })
+  }, [configPath])
 
   useEffect(() => {
-    setDraftBase(provider.defaultBase)
+    setDraftKey('')
+    setDraftBase(auth[activeProvider]?.api_base || provider.defaultBase)
     setDraftModel(provider.defaultModel)
     setSaved(false)
   }, [activeProvider, provider.defaultBase, provider.defaultModel])
@@ -42,8 +51,27 @@ export default function ProvidersPage() {
     })
     setAuth(previous => ({
       ...previous,
-      [activeProvider]: { has_key: !!draftKey, api_base: draftBase || '' },
+      [activeProvider]: { has_key: !!draftKey || !!previous[activeProvider]?.has_key, api_base: draftBase || '' },
     }))
+    setDraftKey('')
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 1600)
+  }
+
+  const handleUseForTranslation = async () => {
+    const existing = await readConfig(configPath || undefined)
+    const current = existing || {}
+    await writeConfig({
+      ...current,
+      llm: {
+        ...(current.llm || {}),
+        provider: activeProvider,
+        model: draftModel || provider.defaultModel,
+        api_base: draftBase || provider.defaultBase,
+        api_key_env: provider.keyEnv,
+      },
+    }, configPath || undefined)
+    setUsingProvider(activeProvider)
     setSaved(true)
     window.setTimeout(() => setSaved(false), 1600)
   }
@@ -71,7 +99,7 @@ export default function ProvidersPage() {
           </p>
         </div>
         <div className={`status-pill ${saved ? 'ready' : auth[activeProvider]?.has_key ? 'ready' : 'warning'}`}>
-          {saved ? 'Saved' : auth[activeProvider]?.has_key ? 'Key saved' : 'Missing key'}
+          {saved ? 'Saved' : usingProvider === activeProvider ? 'In use' : auth[activeProvider]?.has_key ? 'Key saved' : 'Missing key'}
         </div>
       </section>
 
@@ -93,7 +121,7 @@ export default function ProvidersPage() {
                       <div className="provider-meta">{item.defaultModel}</div>
                     </div>
                     <div className={`status-pill ${hasKey || item.id === 'ollama' ? 'ready' : ''}`}>
-                      {hasKey ? 'Saved' : item.id === 'ollama' ? 'Local' : item.badge}
+                      {usingProvider === item.id ? 'In use' : hasKey ? 'Saved' : item.id === 'ollama' ? 'Local' : item.badge}
                     </div>
                   </div>
                   <div className="provider-meta">{item.defaultBase}</div>
@@ -142,6 +170,12 @@ export default function ProvidersPage() {
             helper="The desktop app writes this to the local auth file; it is not committed to the repo."
           />
 
+          {auth[activeProvider]?.has_key && !draftKey && (
+            <div className="secret-saved-note">
+              A key is saved for {provider.label}. It is hidden here; type a new key only when you want to replace it.
+            </div>
+          )}
+
           <div style={{ height: 14 }} />
 
           <Input
@@ -156,6 +190,7 @@ export default function ProvidersPage() {
 
           <div className="button-row">
             <Button variant="primary" onClick={handleSave}>Save provider</Button>
+            <Button variant="accent" onClick={handleUseForTranslation}>Use for translation</Button>
             <Button variant="danger" onClick={handleClear}>Clear</Button>
             <Button variant="ghost" onClick={() => {
               setDraftBase(provider.defaultBase)

@@ -672,6 +672,16 @@ code {
   font-weight: 720;
 }
 
+.secret-saved-note {
+  padding: 10px 12px;
+  border: 1px solid rgba(102, 128, 11, 0.22);
+  border-radius: var(--radius-xs);
+  background: rgba(237, 238, 207, 0.42);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .console-panel,
 .subtitle-panel {
   padding: 14px;

@@ -5,6 +5,8 @@ import { Button } from '../components/FormControls'
 import { cancelRun, onStream, prepareLocalModel, readBackendStatus, revealPath, runPipeline } from '../lib/bridge'
 import type { AppState } from '../App'
 
+const RUN_STATE_KEY = 'transub.runState.v1'
+
 interface Props {
   state: AppState
   updateState: (patch: Partial<AppState>) => void
@@ -13,17 +15,31 @@ interface Props {
 export default function RunPage({ state, updateState }: Props) {
   const location = useLocation()
   const transcribeOnly = (location.state as any)?.transcribeOnly || false
-  const [events, setEvents] = useState<ActivityItem[]>([])
-  const [progress, setProgress] = useState(0)
-  const [status, setStatus] = useState<'idle' | 'preparing' | 'running' | 'done' | 'error'>('idle')
-  const [activeStage, setActiveStage] = useState('ready')
-  const [outputPath, setOutputPath] = useState<string | null>(null)
-  const [logPath, setLogPath] = useState<string | null>(null)
+  const initialRunState = loadSavedRunState(state.videoPath)
+  const [events, setEvents] = useState<ActivityItem[]>(initialRunState.events)
+  const [progress, setProgress] = useState(initialRunState.progress)
+  const [status, setStatus] = useState<'idle' | 'preparing' | 'running' | 'done' | 'error'>(initialRunState.status)
+  const [activeStage, setActiveStage] = useState(initialRunState.activeStage)
+  const [outputPath, setOutputPath] = useState<string | null>(initialRunState.outputPath)
+  const [logPath, setLogPath] = useState<string | null>(initialRunState.logPath)
   const eventRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (eventRef.current) eventRef.current.scrollTop = eventRef.current.scrollHeight
   }, [events])
+
+  useEffect(() => {
+    saveRunState({
+      videoPath: state.videoPath,
+      transcribeOnly,
+      events,
+      progress,
+      status,
+      activeStage,
+      outputPath,
+      logPath,
+    })
+  }, [activeStage, events, logPath, outputPath, progress, state.videoPath, status, transcribeOnly])
 
   useEffect(() => {
     readBackendStatus().then(current => {
@@ -33,6 +49,21 @@ export default function RunPage({ state, updateState }: Props) {
         setProgress(Number(current.progress || 0))
         setLogPath(current.log_path || null)
         updateState({ isRunning: true })
+      } else if (current?.state === 'error') {
+        setStatus('error')
+        setActiveStage(current.stage || initialRunState.activeStage || 'error')
+        setProgress(Number(current.progress || 0))
+        setLogPath(current.log_path || null)
+        setEvents(prev => prev.length > 0 ? prev : [{
+          kind: 'error',
+          title: 'Previous run failed',
+          detail: current.message || 'Fix configuration and run again.',
+        }])
+      } else if (current?.state === 'done') {
+        setStatus('done')
+        setActiveStage('done')
+        setProgress(100)
+        setLogPath(current.log_path || null)
       }
     })
   }, [updateState])
@@ -72,7 +103,6 @@ export default function RunPage({ state, updateState }: Props) {
             detail: data.error || 'The backend stopped before finishing.',
           }))
           setStatus('error')
-          setActiveStage('error')
         }
         updateState({ isRunning: false })
       } else if (data.type === 'error') {
@@ -261,6 +291,47 @@ export default function RunPage({ state, updateState }: Props) {
       </section>
     </div>
   )
+}
+
+interface SavedRunState {
+  videoPath: string | null
+  transcribeOnly: boolean
+  events: ActivityItem[]
+  progress: number
+  status: 'idle' | 'preparing' | 'running' | 'done' | 'error'
+  activeStage: string
+  outputPath: string | null
+  logPath: string | null
+}
+
+function loadSavedRunState(videoPath: string | null): SavedRunState {
+  const fallback: SavedRunState = {
+    videoPath,
+    transcribeOnly: false,
+    events: [],
+    progress: 0,
+    status: 'idle',
+    activeStage: 'ready',
+    outputPath: null,
+    logPath: null,
+  }
+  try {
+    const saved = window.localStorage.getItem(RUN_STATE_KEY)
+    if (!saved) return fallback
+    const parsed = JSON.parse(saved)
+    if (parsed.videoPath && videoPath && parsed.videoPath !== videoPath) return fallback
+    return { ...fallback, ...parsed, status: parsed.status === 'running' ? 'idle' : parsed.status }
+  } catch {
+    return fallback
+  }
+}
+
+function saveRunState(state: SavedRunState) {
+  try {
+    window.localStorage.setItem(RUN_STATE_KEY, JSON.stringify(state))
+  } catch {
+    // Ignore persistence failures; the live run state still works.
+  }
 }
 
 function StepIcon({ label }: { label: string }) {
