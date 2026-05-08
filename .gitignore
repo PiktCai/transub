@@ -105,3 +105,7 @@ transub.conf
 # Generated subtitles (output from pipeline runs)
 *.srt
 *.vtt
+desktop/release/
+desktop/build/
+desktop/dist/transub-server
+desktop/resources/transub-server
