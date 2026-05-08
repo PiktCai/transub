@@ -79,7 +79,6 @@ desktop/dist-electron/
 desktop/out/
 
 # AI assistant notes
-AGENTS.md
 CLAUDE.md
 .sisyphus/
 .pet-runs/

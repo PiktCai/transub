@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - **Simplified WhisperConfig**: Removed `backend`, `execution_mode`, `cli_path`, `cpp_*`, `mlx_*`, `api_*`, `tune_segmentation`, `forced_aligner` fields. Config now has `model`, `device`, `language`, `word_timestamps`, and Whisper tuning parameters.
 - **Concurrent translation**: Improved error handling; failed chunks now raise `LLMTranslationError` instead of being silently skipped. Removed synchronous fallback retry path.
 - **CLI**: `WHISPER_MODEL_SUGGESTIONS` simplified from nested dict to flat list. Removed backend selection from wizard and configure commands.
+- **Docs**: Moved packaging instructions to `docs/packaging.md` and added `docs/README.md` as the documentation index.
 
 ### Added
 - `transub prepare-model` command for pre-downloading/initializing the local ASR model.

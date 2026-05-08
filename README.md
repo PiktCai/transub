@@ -159,6 +159,10 @@ The work directory (defaults to `~/.cache/transub`) stores audio, transcription 
 
 If you want to contribute to `transub`, you can set up a development environment.
 
+Long-form maintainer docs live in [`docs/`](docs/). Start with
+[`docs/desktop.md`](docs/desktop.md) for the Electron app and
+[`docs/packaging.md`](docs/packaging.md) for release packaging.
+
 ### Desktop GUI
 
 The desktop frontend is an **Electron + React + TypeScript** app in `desktop/`. It provides a visual interface for configuring the pipeline, managing provider credentials, running transcription/translation, and previewing subtitles.

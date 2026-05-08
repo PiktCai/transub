@@ -145,6 +145,10 @@ transub --version                     # 查看当前安装的版本号
 
 如果希望参与贡献，可按以下步骤搭建本地环境。
 
+更完整的维护文档位于 [`docs/`](docs/)：桌面应用见
+[`docs/desktop.md`](docs/desktop.md)，发布打包见
+[`docs/packaging.md`](docs/packaging.md)。
+
 ### 桌面 GUI
 
 桌面前端是 `desktop/` 下的 **Electron + React + TypeScript** 应用，提供可视化的流水线配置、凭据管理、转录/翻译运行和字幕预览界面。

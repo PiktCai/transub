@@ -31,7 +31,7 @@ This guide covers the workflow for publishing Transub as a PyPI package and dist
 
 1. **Prepare the environment**
    ```bash
-   python -m pip install --upgrade build twine
+   uv add --dev build twine
    ```
 2. **Clean previous builds**
    ```bash
@@ -49,7 +49,7 @@ This guide covers the workflow for publishing Transub as a PyPI package and dist
 
 5. **Build the distributions**
    ```bash
-   python -m build
+   uv run python -m build
    ```
    This generates `dist/transub-<version>.tar.gz` and `dist/transub-<version>-py3-none-any.whl`.
 
@@ -68,12 +68,11 @@ This guide covers the workflow for publishing Transub as a PyPI package and dist
    ```bash
    # IMPORTANT: Test outside the project directory to avoid import confusion
    cd /tmp
-   python -m venv test_env
+   uv venv test_env
    source test_env/bin/activate  # Windows: test_env\Scripts\activate
-   pip install /path/to/transub/dist/transub-<version>-py3-none-any.whl
+   uv pip install /path/to/transub/dist/transub-<version>-py3-none-any.whl
    transub --help
    deactivate
-   rm -rf test_env
    ```
 
 8. **Upload to TestPyPI**
@@ -82,7 +81,7 @@ This guide covers the workflow for publishing Transub as a PyPI package and dist
    ```
    Install from TestPyPI and validate:
    ```bash
-   python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple transub
+   uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple transub
    transub --help
    ```
 
