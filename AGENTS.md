@@ -1,13 +1,13 @@
 # PROJECT KNOWLEDGE BASE
 
-**Updated:** 2026-05-08
+**Updated:** 2026-05-23
 **Branch:** main
 
 ## OVERVIEW
-Transub is a desktop-first subtitle tool that extracts audio (ffmpeg), transcribes speech (faster-whisper), and translates subtitles (LLM) into SRT/VTT. The Python backend handles the pipeline; the Electron frontend provides the UI.
+Transub is archived as of 2026-05-23. This repository is the preserved Python/Electron implementation of a subtitle pipeline that extracts audio (ffmpeg), transcribes speech (faster-whisper), and translates subtitles (LLM) into SRT/VTT. Active experimentation has moved to the agent-native `transub` skill at https://github.com/PiktCai/skills/tree/main/transub.
 
 ## BRANCH STRUCTURE
-- **`main`** — Active development. Desktop-first architecture, faster-whisper only, Electron + React frontend.
+- **`main`** — Archived/maintenance-only desktop-first implementation. Prefer documentation fixes or small preservation patches over new product features.
 - **`legacy`** — Frozen at v0.2.2 (`633d7f8`, 2025-11-18). Original CLI-only tool with multiple ASR backends. Tagged as `v0.2.2-legacy`.
 
 ## STRUCTURE
@@ -40,6 +40,7 @@ transub/
 | Auth/Credentials | `transub/auth.py` | Provider-scoped API keys in `~/.transub/auth.toml` |
 | Subtitle Processing | `transub/subtitles.py` | SRT/VTT parsing, refinement, word-timing |
 | Desktop GUI | `desktop/`, `docs/desktop.md` | Electron + React desktop frontend |
+| Agent Skill Successor | https://github.com/PiktCai/skills/tree/main/transub | Preferred direction for future subtitle workflow work |
 | Tests | `transub/test_*.py` | **Co-located** in package (not `tests/`); run via `unittest` |
 
 ## CODE MAP
@@ -65,6 +66,7 @@ transub/
 - **Provider secrets UI**: Treat provider keys like a secret manager. Never echo saved keys into inputs; clear key drafts when switching providers; use an explicit action to set the active translation provider.
 
 ## ANTI-PATTERNS (THIS PROJECT)
+- **Do NOT resume feature development here by default**: this repository is archived; move new workflow ideas to the `transub` skill unless explicitly asked to revive the app.
 - **Do NOT split `cli.py` yet**: It is intentionally monolithic for now.
 - **Do NOT run tests via pytest**: Use `python -m unittest`.
 - **Do NOT commit `transub.conf`**: User-specific config; use `transub-sample.conf` as reference.
@@ -103,6 +105,7 @@ TRANSUB_RUN_PERF_TESTS=1 python -m unittest transub.test_concurrent_performance 
 ```
 
 ## NOTES
+- For the archive rationale and future direction, read `docs/archive.md`.
 - `cli.py` is the primary complexity hotspot; read it carefully for pipeline flow.
 - Before changing desktop GUI work, read `docs/desktop.md`.
 - Before changing release packaging, read `docs/packaging.md`.

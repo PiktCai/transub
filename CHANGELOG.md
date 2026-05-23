@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Archived
+- Archived the Python/Electron application on 2026-05-23. Future subtitle workflow experimentation should start from the agent-native `transub` skill at https://github.com/PiktCai/skills/tree/main/transub.
+
 ### Changed
 - **Standardized on faster-whisper**: Removed all alternative ASR backends (local/whisper, mlx, whisper.cpp, cloud API, SenseVoice, Qwen3-ASR). Transcription now uses only `faster-whisper` with word-level timestamps.
 - **Simplified WhisperConfig**: Removed `backend`, `execution_mode`, `cli_path`, `cpp_*`, `mlx_*`, `api_*`, `tune_segmentation`, `forced_aligner` fields. Config now has `model`, `device`, `language`, `word_timestamps`, and Whisper tuning parameters.

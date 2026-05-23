@@ -1,5 +1,7 @@
 # Packaging Transub
 
+> Archived note: this packaging guide is preserved for reference. Do not publish new PyPI, Homebrew, or desktop releases from this archive unless the project is explicitly revived.
+
 This guide covers the workflow for publishing Transub as a PyPI package and distributing it through Homebrew.
 
 ## Prerequisites

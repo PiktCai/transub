@@ -1,5 +1,7 @@
 # Transub Desktop
 
+> Archived note: the desktop app is preserved for reference and maintenance. New subtitle workflow work should start from the [`transub` skill](https://github.com/PiktCai/skills/tree/main/transub).
+
 The desktop app is an Electron + React + TypeScript shell that communicates
 with the Python backend over HTTP. It is the primary GUI in this repository.
 

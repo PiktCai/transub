@@ -2,6 +2,8 @@
 
 [中文说明](https://github.com/PiktCai/transub/blob/main/README.zh-CN.md)
 
+> **Archived 2026-05-23:** this repository is preserved as the original Python/Electron implementation. New subtitle workflow work is moving to the agent-native [`transub` skill](https://github.com/PiktCai/skills/tree/main/transub); see [`docs/archive.md`](docs/archive.md).
+
 Turn any **video** into ready-to-share subtitles. Transub extracts audio with `ffmpeg`, runs Whisper to transcribe the speech track, and hands the text to an LLM so you get well-translated subtitles without leaving the terminal.
 
 ## Table of Contents
@@ -157,7 +159,7 @@ The work directory (defaults to `~/.cache/transub`) stores audio, transcription 
 
 ## Development
 
-If you want to contribute to `transub`, you can set up a development environment.
+This repository is archived and kept for reference. Prefer the `transub` skill for new workflow experiments; use this development setup only for preservation fixes, audits, or deliberate app revival work.
 
 Long-form maintainer docs live in [`docs/`](docs/). Start with
 [`docs/desktop.md`](docs/desktop.md) for the Electron app and

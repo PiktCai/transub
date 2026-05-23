@@ -6,6 +6,7 @@ This directory contains project documentation beyond the root README files.
 
 | File | Purpose |
 |------|---------|
+| [`archive.md`](archive.md) | Archive status, successor skill, and maintenance policy. |
 | [`desktop.md`](desktop.md) | Electron desktop architecture, local FastAPI backend, desktop API endpoints, and debug logs. |
 | [`packaging.md`](packaging.md) | PyPI and Homebrew release workflow. |
 

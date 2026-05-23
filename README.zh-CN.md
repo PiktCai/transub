@@ -2,6 +2,8 @@
 
 [English README](https://github.com/PiktCai/transub/blob/main/README.md)
 
+> **已于 2026-05-23 封存：** 本仓库保留原 Python/Electron 实现作为参考。新的字幕工作流实验转向 agent-native 的 [`transub` Skill](https://github.com/PiktCai/skills/tree/main/transub)；详见 [`docs/archive.md`](docs/archive.md)。
+
 Transub 通过 Typer 命令行，**提取**视频字幕并加以**翻译**：使用 `ffmpeg` 抽取音频，借助 Whisper 完成转写，并由 LLM 进行翻译，生成可直接使用的字幕文件。
 
 ## 目录
@@ -143,7 +145,7 @@ transub --version                     # 查看当前安装的版本号
 
 ## 开发者指南
 
-如果希望参与贡献，可按以下步骤搭建本地环境。
+本仓库已经封存，主要用于保留原实现和必要修补。新的字幕工作流实验优先放到 `transub` Skill；只有在需要做保存性修复、审计或明确恢复 App 开发时，才使用下面的开发环境。
 
 更完整的维护文档位于 [`docs/`](docs/)：桌面应用见
 [`docs/desktop.md`](docs/desktop.md)，发布打包见
